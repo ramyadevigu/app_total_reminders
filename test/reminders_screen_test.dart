@@ -258,6 +258,10 @@ void main() {
     expect(find.text('No reminders yet'), findsOneWidget);
     expect(find.text('Your reminders will appear here.'), findsOneWidget);
     expect(find.byTooltip('Add reminder'), findsOneWidget);
+    final addButton = tester.widget<IconButton>(
+      find.byKey(const ValueKey('reminders-empty-add')),
+    );
+    expect(addButton.style?.shape?.resolve({}), isA<CircleBorder>());
   });
 
   testWidgets('shows loading and recoverable error states', (tester) async {

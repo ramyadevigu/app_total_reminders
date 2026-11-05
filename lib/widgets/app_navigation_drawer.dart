@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -27,11 +28,35 @@ class AppNavigationMenuButton extends StatelessWidget {
       builder: (context) => IconButton(
         key: const ValueKey('global-navigation-button'),
         tooltip: 'Open navigation menu',
-        onPressed: () => Scaffold.of(context).openDrawer(),
+        onPressed: () => AppNavigationDrawerHost.openDrawer(context),
         icon: const Icon(Icons.menu_rounded),
       ),
     );
   }
+}
+
+class AppNavigationDrawerHost extends InheritedWidget {
+  const AppNavigationDrawerHost({
+    super.key,
+    required this.onOpenDrawer,
+    required super.child,
+  });
+
+  final VoidCallback onOpenDrawer;
+
+  static void openDrawer(BuildContext context) {
+    final host = context
+        .getInheritedWidgetOfExactType<AppNavigationDrawerHost>();
+    if (host != null) {
+      host.onOpenDrawer();
+      return;
+    }
+    Scaffold.maybeOf(context)?.openDrawer();
+  }
+
+  @override
+  bool updateShouldNotify(AppNavigationDrawerHost oldWidget) =>
+      onOpenDrawer != oldWidget.onOpenDrawer;
 }
 
 class AppNavigationDrawer extends StatefulWidget {
@@ -97,114 +122,134 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
 
     return Drawer(
       width: width,
-      backgroundColor: colors.surface,
-      child: SafeArea(
-        child: FutureBuilder<List<Notebook>>(
-          future: _notebooksFuture,
-          builder: (context, snapshot) {
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(12, 16, 12, 20),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 18),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.event_note_rounded,
-                        size: 28,
-                        color: colors.primary,
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        'Total Reminders',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  ),
+      backgroundColor: Colors.transparent,
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: ColoredBox(
+            color: colors.surface.withValues(
+              alpha: Theme.of(context).brightness == Brightness.light
+                  ? 0.94
+                  : 0.9,
+            ),
+            child: Material(
+              type: MaterialType.transparency,
+              child: SafeArea(
+                child: FutureBuilder<List<Notebook>>(
+                  future: _notebooksFuture,
+                  builder: (context, snapshot) {
+                    return ListView(
+                      padding: const EdgeInsets.fromLTRB(12, 16, 12, 20),
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 6, 12, 18),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.event_note_rounded,
+                                size: 28,
+                                color: colors.primary,
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                'Profile',
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                            ],
+                          ),
+                        ),
+                        _destinationTile(
+                          context,
+                          AppNavigationDestination.profile,
+                          Icons.account_circle_outlined,
+                          'Profile',
+                        ),
+                        _destinationTile(
+                          context,
+                          AppNavigationDestination.search,
+                          Icons.search_rounded,
+                          'Search',
+                        ),
+                        _destinationTile(
+                          context,
+                          AppNavigationDestination.myDay,
+                          Icons.wb_sunny_outlined,
+                          'My Day',
+                        ),
+                        _divider(context),
+                        _sectionLabel(context, 'PLANNING'),
+                        _destinationTile(
+                          context,
+                          AppNavigationDestination.calendar,
+                          Icons.calendar_month_outlined,
+                          'Calendar',
+                        ),
+                        _divider(context),
+                        _sectionLabel(context, 'NOTES'),
+                        _destinationTile(
+                          context,
+                          AppNavigationDestination.notes,
+                          Icons.sticky_note_2_outlined,
+                          'Notes',
+                        ),
+                        if (snapshot.hasError)
+                          ListTile(
+                            leading: const Icon(Icons.warning_amber_rounded),
+                            title: const Text('Categories unavailable'),
+                            subtitle: const Text('Notes could not be loaded.'),
+                          )
+                        else if (snapshot.connectionState !=
+                            ConnectionState.done)
+                          const Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Center(
+                              child: SizedBox.square(
+                                dimension: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          for (final notebook
+                              in snapshot.data ?? const <Notebook>[])
+                            _notebookTile(context, notebook),
+                        _divider(context),
+                        _destinationTile(
+                          context,
+                          AppNavigationDestination.reminders,
+                          Icons.notifications_none_rounded,
+                          'Alarms',
+                        ),
+                        _sectionLabel(context, 'TOOLS'),
+                        _destinationTile(
+                          context,
+                          AppNavigationDestination.stopwatch,
+                          Icons.av_timer_outlined,
+                          'Stopwatch',
+                        ),
+                        _destinationTile(
+                          context,
+                          AppNavigationDestination.timer,
+                          Icons.hourglass_bottom_outlined,
+                          'Timer',
+                        ),
+                        _divider(context),
+                        _destinationTile(
+                          context,
+                          AppNavigationDestination.settings,
+                          Icons.settings_outlined,
+                          'Settings',
+                        ),
+                      ],
+                    );
+                  },
                 ),
-                _destinationTile(
-                  context,
-                  AppNavigationDestination.profile,
-                  Icons.account_circle_outlined,
-                  'Profile',
-                ),
-                _destinationTile(
-                  context,
-                  AppNavigationDestination.search,
-                  Icons.search_rounded,
-                  'Search',
-                ),
-                _destinationTile(
-                  context,
-                  AppNavigationDestination.reminders,
-                  Icons.notifications_none_rounded,
-                  'Reminders',
-                ),
-                _destinationTile(
-                  context,
-                  AppNavigationDestination.settings,
-                  Icons.settings_outlined,
-                  'Settings',
-                ),
-                _divider(context),
-                _sectionLabel(context, 'PLANNING'),
-                _destinationTile(
-                  context,
-                  AppNavigationDestination.calendar,
-                  Icons.calendar_month_outlined,
-                  'Calendar',
-                ),
-                _destinationTile(
-                  context,
-                  AppNavigationDestination.myDay,
-                  Icons.wb_sunny_outlined,
-                  'My Day',
-                ),
-                _divider(context),
-                _sectionLabel(context, 'NOTES'),
-                _destinationTile(
-                  context,
-                  AppNavigationDestination.notes,
-                  Icons.sticky_note_2_outlined,
-                  'Notes',
-                ),
-                if (snapshot.hasError)
-                  ListTile(
-                    leading: const Icon(Icons.warning_amber_rounded),
-                    title: const Text('Categories unavailable'),
-                    subtitle: const Text('Notes could not be loaded.'),
-                  )
-                else if (snapshot.connectionState != ConnectionState.done)
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Center(
-                      child: SizedBox.square(
-                        dimension: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                  )
-                else
-                  for (final notebook in snapshot.data ?? const <Notebook>[])
-                    _notebookTile(context, notebook),
-                _divider(context),
-                _sectionLabel(context, 'TOOLS'),
-                _destinationTile(
-                  context,
-                  AppNavigationDestination.stopwatch,
-                  Icons.av_timer_outlined,
-                  'Stopwatch',
-                ),
-                _destinationTile(
-                  context,
-                  AppNavigationDestination.timer,
-                  Icons.hourglass_bottom_outlined,
-                  'Timer',
-                ),
-              ],
-            );
-          },
+              ),
+            ),
+          ),
         ),
       ),
     );

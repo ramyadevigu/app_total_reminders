@@ -25,6 +25,12 @@ void main() {
         dateTime: DateTime(2026, 2, 27, 7),
         type: RecurrenceType.daily,
       ),
+      _reminder(
+        id: 'yearly',
+        title: 'Yearly',
+        dateTime: DateTime(2025, 2, 12, 7),
+        type: RecurrenceType.yearly,
+      ),
     ];
 
     final occurrences = service.occurrencesBetween(
@@ -33,18 +39,14 @@ void main() {
       endExclusive: DateTime(2026, 3, 1),
     );
 
-    expect(occurrences.keys, isNot(contains(DateTime(2026, 2, 27))));
+    expect(occurrences.keys, contains(DateTime(2026, 2, 27)));
+    expect(occurrences.keys, contains(DateTime(2026, 2, 12)));
     expect(occurrences.keys, contains(DateTime(2026, 2, 28)));
     expect(
       occurrences[DateTime(2026, 2, 28)]!.map((item) => item.reminder.id),
-      ['once', 'monthly'],
+      ['daily', 'once', 'monthly'],
     );
-    expect(
-      occurrences.values
-          .expand((dayOccurrences) => dayOccurrences)
-          .map((item) => item.reminder.id),
-      isNot(contains('daily')),
-    );
+    expect(occurrences[DateTime(2026, 2, 27)]!.single.reminder.id, 'daily');
     expect(occurrences.keys, isNot(contains(DateTime(2026, 3, 1))));
   });
 
@@ -142,8 +144,7 @@ void main() {
         .expand((dayOccurrences) => dayOccurrences)
         .map((item) => item.reminder.id)
         .toSet();
-    expect(displayedIds, isNot(contains('daily')));
-    expect(displayedIds, isNot(contains('weekdays')));
+    expect(displayedIds, containsAll(['daily', 'weekdays']));
   });
 
   test('filters Calendar occurrences by recurrence visibility', () {
@@ -239,19 +240,15 @@ void main() {
         'one-time',
         'weekly',
         'monthly',
+        'daily',
+        'twice-weekly',
+        'weekdays',
+        'every-two-days',
         'every-two-weeks',
         'monthly-alarm',
+        'daily-alarm',
       ]),
     );
-    for (final excludedId in [
-      'daily',
-      'twice-weekly',
-      'weekdays',
-      'every-two-days',
-      'daily-alarm',
-    ]) {
-      expect(displayedIds, isNot(contains(excludedId)));
-    }
   });
 
   test('excludes disabled and completed reminders', () {

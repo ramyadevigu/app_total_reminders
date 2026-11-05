@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../theme/app_design_tokens.dart';
 import '../services/google_auth_service.dart';
+import '../services/profile_name_store.dart';
 import '../widgets/google_profile_avatar.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -17,6 +18,166 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _isSigningOut = false;
+  String? _loadingProfileNameFor;
+
+  void _loadProfileName(User user) {
+    if (_loadingProfileNameFor == user.uid) {
+      return;
+    }
+    _loadingProfileNameFor = user.uid;
+    ProfileNameStore.instance
+        .load(userId: user.uid, googleName: user.displayName ?? '')
+        .catchError((Object error, StackTrace stackTrace) {
+          FlutterError.reportError(
+            FlutterErrorDetails(
+              exception: error,
+              stack: stackTrace,
+              library: 'Profile name loading',
+            ),
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Unable to load the saved profile name.'),
+              ),
+            );
+          }
+        });
+  }
+
+  Future<void> _editName(User user) async {
+    try {
+      await ProfileNameStore.instance.load(
+        userId: user.uid,
+        googleName: user.displayName ?? '',
+      );
+    } on Object catch (error, stackTrace) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'Profile name loading',
+        ),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to load the saved profile name.'),
+          ),
+        );
+      }
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    final currentName = ProfileNameStore.instance.nameFor(
+      userId: user.uid,
+      googleName: user.displayName ?? '',
+    );
+    final controller = TextEditingController(text: currentName);
+    final formKey = GlobalKey<FormState>();
+    var isSaving = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Edit Name'),
+          content: Form(
+            key: formKey,
+            child: TextFormField(
+              controller: controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) => value?.trim().isNotEmpty == true
+                  ? null
+                  : 'Name cannot be empty.',
+              onFieldSubmitted: (_) {
+                if (formKey.currentState?.validate() == true && !isSaving) {
+                  setDialogState(() => isSaving = true);
+                  _saveProfileName(
+                    user,
+                    controller.text,
+                    dialogContext,
+                    onFailure: () => setDialogState(() => isSaving = false),
+                  );
+                }
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSaving
+                  ? null
+                  : () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: isSaving
+                  ? null
+                  : () {
+                      if (formKey.currentState?.validate() != true) {
+                        return;
+                      }
+                      setDialogState(() => isSaving = true);
+                      _saveProfileName(
+                        user,
+                        controller.text,
+                        dialogContext,
+                        onFailure: () => setDialogState(() => isSaving = false),
+                      );
+                    },
+              child: isSaving
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+  }
+
+  Future<void> _saveProfileName(
+    User user,
+    String name,
+    BuildContext dialogContext, {
+    required VoidCallback onFailure,
+  }) async {
+    try {
+      await ProfileNameStore.instance.save(
+        userId: user.uid,
+        googleName: user.displayName ?? '',
+        name: name,
+      );
+      if (dialogContext.mounted) {
+        Navigator.of(dialogContext).pop();
+      }
+    } on Object catch (error, stackTrace) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'Profile name saving',
+        ),
+      );
+      if (dialogContext.mounted) {
+        ScaffoldMessenger.of(dialogContext).showSnackBar(
+          const SnackBar(content: Text('Unable to save the profile name.')),
+        );
+        onFailure();
+      }
+    }
+  }
 
   Future<void> _signOut() async {
     if (_isSigningOut) {
@@ -106,9 +267,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             );
           }
+          _loadProfileName(user);
 
           final colorScheme = Theme.of(context).colorScheme;
-          final displayName = user.displayName?.trim();
           final email = user.email?.trim();
           return SafeArea(
             child: Center(
@@ -128,13 +289,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         children: [
                           GoogleProfileAvatar(user: user, radius: 52),
                           const SizedBox(height: AppSpacing.lg),
-                          Text(
-                            displayName?.isNotEmpty == true
-                                ? displayName!
-                                : 'Google account',
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.headlineSmall
-                                ?.copyWith(fontWeight: FontWeight.w600),
+                          AnimatedBuilder(
+                            animation: ProfileNameStore.instance,
+                            builder: (context, child) => Text(
+                              ProfileNameStore.instance.nameFor(
+                                userId: user.uid,
+                                googleName: user.displayName ?? '',
+                              ),
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
                           ),
                           const SizedBox(height: AppSpacing.xs),
                           Text(
@@ -144,6 +309,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             textAlign: TextAlign.center,
                             style: Theme.of(context).textTheme.bodyLarge
                                 ?.copyWith(color: colorScheme.onSurfaceVariant),
+                          ),
+                          const SizedBox(height: AppSpacing.lg),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              key: const ValueKey('edit-profile-name-button'),
+                              onPressed: () => _editName(user),
+                              icon: const Icon(Icons.edit_outlined),
+                              label: const Text('Edit Name'),
+                            ),
                           ),
                           const SizedBox(height: AppSpacing.xxl),
                           SizedBox(

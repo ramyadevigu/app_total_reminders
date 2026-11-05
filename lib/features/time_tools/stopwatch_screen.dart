@@ -2,15 +2,19 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../widgets/app_navigation_drawer.dart';
+
 class StopwatchScreen extends StatefulWidget {
   const StopwatchScreen({
     super.key,
     required this.appMenu,
     this.navigationDrawer,
+    this.useInternalNavigationDrawer = true,
   });
 
   final Widget appMenu;
   final Widget? navigationDrawer;
+  final bool useInternalNavigationDrawer;
 
   @override
   State<StopwatchScreen> createState() => _StopwatchScreenState();
@@ -107,14 +111,16 @@ class _StopwatchScreenState extends State<StopwatchScreen> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      drawer: widget.navigationDrawer,
+      drawer: widget.useInternalNavigationDrawer
+          ? widget.navigationDrawer
+          : null,
       appBar: AppBar(
         title: const Text('Stopwatch'),
         leading: Builder(
           builder: (context) => IconButton(
             key: const ValueKey('global-navigation-button'),
             tooltip: 'Open navigation menu',
-            onPressed: () => Scaffold.of(context).openDrawer(),
+            onPressed: () => AppNavigationDrawerHost.openDrawer(context),
             icon: const Icon(Icons.menu_rounded),
           ),
         ),

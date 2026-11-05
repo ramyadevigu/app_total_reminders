@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../../services/analytics_service.dart';
 import '../reminders/models/reminder.dart';
 import '../reminders/services/reminder_storage.dart';
-import '../../../theme/app_design_tokens.dart';
+import '../../theme/app_design_tokens.dart';
 import 'models/note_workspace_models.dart';
 import 'models/rich_note_draft.dart';
 import 'screens/rich_note_editor_screen.dart';
@@ -16,6 +16,7 @@ import 'theme/notebook_colors.dart';
 import 'services/note_workspace_storage.dart';
 import 'widgets/notes_home_quick_create_menu.dart';
 import 'widgets/recent_note_card.dart';
+import '../../widgets/app_navigation_drawer.dart';
 
 enum _NotesDestination { notes, archive, deleted }
 
@@ -34,6 +35,7 @@ class NotesScreen extends StatefulWidget {
     this.onOpenFeedback,
     this.initialNotebooks,
     this.workspaceStorage,
+    this.useInternalNavigationDrawer = true,
   });
 
   final Widget? appMenu;
@@ -46,6 +48,7 @@ class NotesScreen extends StatefulWidget {
   final Future<void> Function()? onOpenFeedback;
   final List<Notebook>? initialNotebooks;
   final NoteWorkspaceStorage? workspaceStorage;
+  final bool useInternalNavigationDrawer;
 
   @override
   State<NotesScreen> createState() => NotesScreenState();
@@ -151,7 +154,6 @@ class NotesScreenState extends State<NotesScreen> {
         return;
       }
       setState(() {
-        _notebooks = List<Notebook>.of(_emptyNotebookList);
         _isLoading = false;
         _storageError = 'Notes could not be restored. Changes may not persist.';
       });
@@ -491,7 +493,7 @@ class NotesScreenState extends State<NotesScreen> {
     await _updateNotebook(updated);
   }
 
-  Future<void> _saveNote(NoteEntry note) async {
+  Future<bool> _saveNote(NoteEntry note) async {
     final destinationExists = _notebooks.any(
       (notebook) => notebook.id == note.notebookId,
     );
@@ -518,15 +520,25 @@ class NotesScreenState extends State<NotesScreen> {
       }
       return notebook.copyWith(notes: notes, updatedAt: now);
     }).toList();
+    final previousNotebooks = _notebooks;
     setState(() {
       _notebooks = updatedNotebooks;
     });
     if (widget.initialNotebooks == null) {
       final saved = await _persistWorkspace();
+      if (!saved) {
+        if (mounted && identical(_notebooks, updatedNotebooks)) {
+          setState(() {
+            _notebooks = previousNotebooks;
+          });
+        }
+        return false;
+      }
       if (saved && isNewNote) {
         unawaited(AnalyticsService.instance.logNoteCreated());
       }
     }
+    return true;
   }
 
   Future<void> _deleteNote(String noteId) async {
@@ -713,7 +725,12 @@ class NotesScreenState extends State<NotesScreen> {
                 !startWithChecklist) {
               return;
             }
-            await _saveNote(_noteFromDraft(base: note, draft: snapshot));
+            final saved = await _saveNote(
+              _noteFromDraft(base: note, draft: snapshot),
+            );
+            if (!saved) {
+              throw Exception('Notes workspace save failed.');
+            }
           },
           onPinChanged: (snapshot) async {
             await _saveNote(_noteFromDraft(base: note, draft: snapshot));
@@ -779,7 +796,9 @@ class NotesScreenState extends State<NotesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      drawer: widget.navigationDrawer ?? _buildNavigationDrawer(context),
+      drawer: widget.useInternalNavigationDrawer
+          ? widget.navigationDrawer ?? _buildNavigationDrawer(context)
+          : null,
       appBar: AppBar(
         automaticallyImplyLeading: false,
         leadingWidth: 52,
@@ -787,7 +806,7 @@ class NotesScreenState extends State<NotesScreen> {
           builder: (context) => IconButton(
             key: const ValueKey('notes-drawer-button'),
             tooltip: 'Open navigation menu',
-            onPressed: () => Scaffold.of(context).openDrawer(),
+            onPressed: () => AppNavigationDrawerHost.openDrawer(context),
             icon: const Icon(Icons.menu_rounded),
           ),
         ),
@@ -1165,8 +1184,8 @@ class NotesScreenState extends State<NotesScreen> {
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: crossAxisCount,
                       mainAxisExtent: 176,
-                      crossAxisSpacing: 10,
-                      mainAxisSpacing: 10,
+                      crossAxisSpacing: 6,
+                      mainAxisSpacing: 6,
                     ),
                     itemBuilder: (context, index) =>
                         _buildNoteCard(notes[index], compact: true),
@@ -1177,7 +1196,7 @@ class NotesScreenState extends State<NotesScreen> {
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: notes.length,
                     separatorBuilder: (context, index) =>
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 6),
                     itemBuilder: (context, index) => SizedBox(
                       height: 176,
                       child: _buildNoteCard(notes[index], compact: false),

@@ -4,14 +4,21 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../widgets/app_navigation_drawer.dart';
 import '../../theme/app_design_tokens.dart';
 import '../../theme/premium_surface.dart';
 
 class TimerScreen extends StatefulWidget {
-  const TimerScreen({super.key, required this.appMenu, this.navigationDrawer});
+  const TimerScreen({
+    super.key,
+    required this.appMenu,
+    this.navigationDrawer,
+    this.useInternalNavigationDrawer = true,
+  });
 
   final Widget appMenu;
   final Widget? navigationDrawer;
+  final bool useInternalNavigationDrawer;
 
   @override
   State<TimerScreen> createState() => _TimerScreenState();
@@ -204,14 +211,16 @@ class _TimerScreenState extends State<TimerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      drawer: widget.navigationDrawer,
+      drawer: widget.useInternalNavigationDrawer
+          ? widget.navigationDrawer
+          : null,
       appBar: AppBar(
         title: const Text('Timers'),
         leading: Builder(
           builder: (context) => IconButton(
             key: const ValueKey('global-navigation-button'),
             tooltip: 'Open navigation menu',
-            onPressed: () => Scaffold.of(context).openDrawer(),
+            onPressed: () => AppNavigationDrawerHost.openDrawer(context),
             icon: const Icon(Icons.menu_rounded),
           ),
         ),

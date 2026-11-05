@@ -62,14 +62,13 @@ void main() {
 
     expect(find.byType(CalendarScreen), findsOneWidget);
     expect(find.byType(RemindersScreen), findsNothing);
-    expect(find.byType(NavigationDestination), findsNWidgets(6));
+    expect(find.byType(NavigationDestination), findsNWidgets(5));
     final destinations = tester
         .widgetList<NavigationDestination>(find.byType(NavigationDestination))
         .map((destination) => destination.label)
         .toList();
     expect(destinations, [
       'Calendar',
-      'My Day',
       'Notes',
       'Alarms',
       'Stopwatch',
@@ -90,7 +89,6 @@ void main() {
     );
     for (final key in [
       'nav-calendar',
-      'nav-my-day',
       'nav-notes',
       'nav-alarms',
       'nav-stopwatch',

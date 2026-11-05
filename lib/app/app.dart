@@ -36,12 +36,20 @@ class AppSmarana extends StatefulWidget {
     this.initialAccentColor = defaultAccentColor,
     this.themePreferenceStore = const ThemePreferenceStore(),
     this.initializeServicesAfterFirstFrame,
+    this.ringingAlarmIds,
+    this.stoppedAlarmIds,
+    this.readActiveAlarmReminderId,
+    this.loadAlarmReminders,
   });
 
   final ThemeMode initialThemeMode;
   final Color initialAccentColor;
   final ThemePreferenceStore themePreferenceStore;
   final Future<void> Function()? initializeServicesAfterFirstFrame;
+  final Stream<String>? ringingAlarmIds;
+  final Stream<String>? stoppedAlarmIds;
+  final Future<String?> Function()? readActiveAlarmReminderId;
+  final Future<List<Reminder>> Function()? loadAlarmReminders;
 
   @override
   State<AppSmarana> createState() => _AppSmaranaState();
@@ -57,6 +65,8 @@ class _AppSmaranaState extends State<AppSmarana> {
   bool _openingNotificationReminder = false;
   bool _openingRingingAlarm = false;
   String? _ringingAlarmId;
+  String? _pendingRingingAlarmId;
+  Route<void>? _ringingAlarmRoute;
 
   @override
   void initState() {
@@ -67,12 +77,14 @@ class _AppSmaranaState extends State<AppSmarana> {
     _notificationSubscription = notifications.openedReminderIds.listen(
       _openReminderFromNotification,
     );
-    _alarmSubscription = notifications.ringingReminderIds.listen(
-      _openRingingAlarm,
-    );
-    _alarmStoppedSubscription = notifications.stoppedReminderIds.listen(
-      _closeRingingAlarm,
-    );
+    _alarmSubscription =
+        (widget.ringingAlarmIds ?? notifications.ringingReminderIds).listen(
+          _openRingingAlarm,
+        );
+    _alarmStoppedSubscription =
+        (widget.stoppedAlarmIds ?? notifications.stoppedReminderIds).listen(
+          _closeRingingAlarm,
+        );
     final initializeServicesAfterFirstFrame =
         widget.initializeServicesAfterFirstFrame;
     if (initializeServicesAfterFirstFrame != null) {
@@ -172,15 +184,33 @@ class _AppSmaranaState extends State<AppSmarana> {
   }
 
   Future<void> _restoreRingingAlarm() async {
-    final reminderId = await NotificationService.instance
-        .activeAlarmReminderId();
+    final reminderId = await _readActiveAlarmReminderId();
     if (reminderId != null) {
       await _openRingingAlarm(reminderId);
     }
   }
 
+  Future<String?> _readActiveAlarmReminderId() {
+    final read = widget.readActiveAlarmReminderId;
+    return read == null
+        ? NotificationService.instance.activeAlarmReminderId()
+        : read();
+  }
+
+  Future<List<Reminder>> _loadAlarmReminders() {
+    final load = widget.loadAlarmReminders;
+    return load == null ? ReminderStorage().getReminders() : load();
+  }
+
   Future<void> _openRingingAlarm(String reminderId) async {
-    if (_openingRingingAlarm || !mounted) {
+    if (!mounted) {
+      return;
+    }
+    if (_openingRingingAlarm) {
+      if (_ringingAlarmId != reminderId) {
+        _pendingRingingAlarmId = reminderId;
+        _dismissRingingAlarmRoute();
+      }
       return;
     }
 
@@ -193,13 +223,13 @@ class _AppSmaranaState extends State<AppSmarana> {
     }
 
     _openingRingingAlarm = true;
+    Route<void>? ringingRoute;
     try {
-      final activeReminderId = await NotificationService.instance
-          .activeAlarmReminderId();
+      final activeReminderId = await _readActiveAlarmReminderId();
       if (activeReminderId != reminderId || !mounted) {
         return;
       }
-      final reminders = await ReminderStorage().getReminders();
+      final reminders = await _loadAlarmReminders();
       Reminder? ringingReminder;
       for (final reminder in reminders) {
         if (reminder.id == reminderId) {
@@ -209,12 +239,12 @@ class _AppSmaranaState extends State<AppSmarana> {
       }
       if (ringingReminder != null && mounted) {
         _ringingAlarmId = reminderId;
-        await navigator.push<void>(
-          MaterialPageRoute<void>(
-            builder: (_) => AlarmRingingScreen(reminder: ringingReminder!),
-            fullscreenDialog: true,
-          ),
+        ringingRoute = MaterialPageRoute<void>(
+          builder: (_) => AlarmRingingScreen(reminder: ringingReminder!),
+          fullscreenDialog: true,
         );
+        _ringingAlarmRoute = ringingRoute;
+        await navigator.push<void>(ringingRoute);
       }
     } on Exception catch (error, stackTrace) {
       FlutterError.reportError(
@@ -226,7 +256,15 @@ class _AppSmaranaState extends State<AppSmarana> {
       );
     } finally {
       _ringingAlarmId = null;
+      if (identical(_ringingAlarmRoute, ringingRoute)) {
+        _ringingAlarmRoute = null;
+      }
       _openingRingingAlarm = false;
+      final pendingReminderId = _pendingRingingAlarmId;
+      _pendingRingingAlarmId = null;
+      if (pendingReminderId != null && mounted) {
+        unawaited(_openRingingAlarm(pendingReminderId));
+      }
     }
   }
 
@@ -234,9 +272,16 @@ class _AppSmaranaState extends State<AppSmarana> {
     if (!mounted || _ringingAlarmId != reminderId) {
       return;
     }
+
+    _dismissRingingAlarmRoute();
+  }
+
+  void _dismissRingingAlarmRoute() {
     final navigator = _navigatorKey.currentState;
-    if (navigator?.canPop() == true) {
-      navigator!.pop();
+    final route = _ringingAlarmRoute;
+    if (navigator != null && route != null && route.isActive) {
+      _ringingAlarmRoute = null;
+      navigator.removeRoute(route);
     }
   }
 
@@ -340,8 +385,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  bool _showingMyDay = false;
   final ValueNotifier<int> _noteWorkspaceRevision = ValueNotifier(0);
   final Set<int> _visitedTabs = {0};
+  final GlobalKey<ScaffoldState> _homeScaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey<NotesScreenState> _notesScreenKey =
       GlobalKey<NotesScreenState>();
   final NoteWorkspaceStorage _noteWorkspaceStorage = NoteWorkspaceStorage();
@@ -378,77 +425,88 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Scaffold(
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1280),
-          child: IndexedStack(
-            index: _currentIndex,
-            children: List<Widget>.generate(6, _buildTab),
+    final selectedDestination = _showingMyDay
+        ? AppNavigationDestination.myDay
+        : switch (_currentIndex) {
+            0 => AppNavigationDestination.calendar,
+            1 => AppNavigationDestination.notes,
+            2 => AppNavigationDestination.reminders,
+            3 => AppNavigationDestination.stopwatch,
+            _ => AppNavigationDestination.timer,
+          };
+    return AppNavigationDrawerHost(
+      onOpenDrawer: () => _homeScaffoldKey.currentState?.openDrawer(),
+      child: Scaffold(
+        key: _homeScaffoldKey,
+        drawer: _buildNavigationDrawer(selectedDestination),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1280),
+            child: IndexedStack(
+              index: _showingMyDay ? 5 : _currentIndex,
+              children: List<Widget>.generate(6, _buildTab),
+            ),
           ),
         ),
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        indicatorColor: colorScheme.primary.withValues(
-          alpha: Theme.of(context).brightness == Brightness.light ? 0.12 : 0.2,
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _currentIndex,
+          indicatorColor: colorScheme.primary.withValues(
+            alpha: Theme.of(context).brightness == Brightness.light
+                ? 0.12
+                : 0.2,
+          ),
+          onDestinationSelected: (index) {
+            setState(() {
+              _visitedTabs.add(index);
+              _currentIndex = index;
+              _showingMyDay = false;
+            });
+          },
+          destinations: [
+            NavigationDestination(
+              key: ValueKey('nav-calendar'),
+              icon: Icon(Icons.calendar_month_outlined),
+              selectedIcon: Icon(
+                Icons.calendar_month,
+                color: colorScheme.primary,
+              ),
+              label: 'Calendar',
+            ),
+            NavigationDestination(
+              key: ValueKey('nav-notes'),
+              icon: Icon(Icons.sticky_note_2_outlined),
+              selectedIcon: Icon(
+                Icons.sticky_note_2,
+                color: colorScheme.primary,
+              ),
+              label: 'Notes',
+            ),
+            NavigationDestination(
+              key: ValueKey('nav-alarms'),
+              icon: Icon(Icons.notifications_none),
+              selectedIcon: Icon(
+                Icons.notifications_active,
+                color: colorScheme.primary,
+              ),
+              label: 'Alarms',
+            ),
+            NavigationDestination(
+              key: ValueKey('nav-stopwatch'),
+              icon: Icon(Icons.av_timer_outlined),
+              selectedIcon: Icon(Icons.av_timer, color: colorScheme.primary),
+              label: 'Stopwatch',
+            ),
+            NavigationDestination(
+              key: ValueKey('nav-timer'),
+              icon: Icon(Icons.hourglass_bottom_outlined),
+              selectedIcon: Icon(
+                Icons.hourglass_bottom,
+                color: colorScheme.primary,
+              ),
+              label: 'Timer',
+            ),
+          ],
         ),
-        onDestinationSelected: (index) {
-          setState(() {
-            _visitedTabs.add(index);
-            _currentIndex = index;
-          });
-        },
-        destinations: [
-          NavigationDestination(
-            key: ValueKey('nav-calendar'),
-            icon: Icon(Icons.calendar_month_outlined),
-            selectedIcon: Icon(
-              Icons.calendar_month,
-              color: colorScheme.primary,
-            ),
-            label: 'Calendar',
-          ),
-          NavigationDestination(
-            key: ValueKey('nav-my-day'),
-            icon: Icon(Icons.wb_sunny_outlined),
-            selectedIcon: Icon(
-              Icons.wb_sunny_rounded,
-              color: colorScheme.primary,
-            ),
-            label: 'My Day',
-          ),
-          NavigationDestination(
-            key: ValueKey('nav-notes'),
-            icon: Icon(Icons.sticky_note_2_outlined),
-            selectedIcon: Icon(Icons.sticky_note_2, color: colorScheme.primary),
-            label: 'Notes',
-          ),
-          NavigationDestination(
-            key: ValueKey('nav-alarms'),
-            icon: Icon(Icons.notifications_none),
-            selectedIcon: Icon(
-              Icons.notifications_active,
-              color: colorScheme.primary,
-            ),
-            label: 'Alarms',
-          ),
-          NavigationDestination(
-            key: ValueKey('nav-stopwatch'),
-            icon: Icon(Icons.av_timer_outlined),
-            selectedIcon: Icon(Icons.av_timer, color: colorScheme.primary),
-            label: 'Stopwatch',
-          ),
-          NavigationDestination(
-            key: ValueKey('nav-timer'),
-            icon: Icon(Icons.hourglass_bottom_outlined),
-            selectedIcon: Icon(
-              Icons.hourglass_bottom,
-              color: colorScheme.primary,
-            ),
-            label: 'Timer',
-          ),
-        ],
       ),
     );
   }
@@ -466,47 +524,56 @@ class _HomeScreenState extends State<HomeScreen> {
         navigationDrawer: _buildNavigationDrawer(
           AppNavigationDestination.calendar,
         ),
+        useInternalNavigationDrawer: false,
       ),
-      1 => MyDayScreen(
-        appMenu: _buildAppMenu(),
-        navigationDrawer: _buildNavigationDrawer(
-          AppNavigationDestination.myDay,
-        ),
-      ),
-      2 => NotesScreen(
+      1 => NotesScreen(
         key: _notesScreenKey,
         appMenu: _buildAppMenu(),
         navigationDrawer: _buildNavigationDrawer(
           AppNavigationDestination.notes,
         ),
+        useInternalNavigationDrawer: false,
         onBackToSmarana: _returnToCalendar,
         onWorkspaceChanged: _refreshNoteWorkspace,
         onOpenSettings: () => _handleAppMenuAction(_AppMenuAction.settings),
         onOpenHelp: () => _handleAppMenuAction(_AppMenuAction.help),
         onOpenFeedback: () => _handleAppMenuAction(_AppMenuAction.feedback),
       ),
-      3 => RemindersScreen(
+      2 => RemindersScreen(
         title: 'Alarms',
         appMenu: _buildAppMenu(),
         navigationDrawer: _buildNavigationDrawer(
           AppNavigationDestination.reminders,
         ),
+        useInternalNavigationDrawer: false,
       ),
-      4 => StopwatchScreen(
+      3 => StopwatchScreen(
         appMenu: _buildAppMenu(),
         navigationDrawer: _buildNavigationDrawer(
           AppNavigationDestination.stopwatch,
         ),
+        useInternalNavigationDrawer: false,
       ),
-      5 => TimerScreen(
+      4 => TimerScreen(
         appMenu: _buildAppMenu(),
         navigationDrawer: _buildNavigationDrawer(
           AppNavigationDestination.timer,
         ),
+        useInternalNavigationDrawer: false,
+      ),
+      5 => MyDayScreen(
+        appMenu: _buildAppMenu(),
+        navigationDrawer: _buildNavigationDrawer(
+          AppNavigationDestination.myDay,
+        ),
+        onNoteSelected: _openNoteFromDrawer,
       ),
       _ => const SizedBox.shrink(),
     };
-    return TickerMode(enabled: index == _currentIndex, child: tab);
+    return TickerMode(
+      enabled: index == (_showingMyDay ? 5 : _currentIndex),
+      child: tab,
+    );
   }
 
   Widget _buildNavigationDrawer(AppNavigationDestination selected) {
@@ -547,32 +614,32 @@ class _HomeScreenState extends State<HomeScreen> {
         _navigateToTab(0);
         return;
       case AppNavigationDestination.myDay:
-        _navigateToTab(1);
+        _navigateToMyDay();
         return;
       case AppNavigationDestination.notes:
-        _navigateToTab(2);
+        _navigateToTab(1);
         return;
       case AppNavigationDestination.reminders:
-        _navigateToTab(3);
+        _navigateToTab(2);
         return;
       case AppNavigationDestination.stopwatch:
-        _navigateToTab(4);
+        _navigateToTab(3);
         return;
       case AppNavigationDestination.timer:
-        _navigateToTab(5);
+        _navigateToTab(4);
         return;
     }
   }
 
   void _openNotebookFromDrawer(String notebookId) {
-    _navigateToTab(2);
+    _navigateToTab(1);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _notesScreenKey.currentState?.openNotebookById(notebookId);
     });
   }
 
   void _openNoteFromDrawer(String notebookId, NoteEntry note) {
-    _navigateToTab(2);
+    _navigateToTab(1);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _notesScreenKey.currentState?.openNoteById(notebookId, note.id);
     });
@@ -612,7 +679,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     controller.dispose();
     if (query == null || query.trim().isEmpty) return;
-    _navigateToTab(2);
+    _navigateToTab(1);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _notesScreenKey.currentState?.searchFor(query.trim());
     });
@@ -725,22 +792,32 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _returnToCalendar() {
-    if (_currentIndex == 0) {
+    if (_currentIndex == 0 && !_showingMyDay) {
       return;
     }
     setState(() {
       _currentIndex = 0;
+      _showingMyDay = false;
     });
   }
 
   void _navigateToTab(int index) {
-    if (index < 0 || index >= 6) {
+    if (index < 0 || index >= 5) {
       return;
     }
     _popToHome();
     setState(() {
       _visitedTabs.add(index);
       _currentIndex = index;
+      _showingMyDay = false;
+    });
+  }
+
+  void _navigateToMyDay() {
+    _popToHome();
+    setState(() {
+      _visitedTabs.add(5);
+      _showingMyDay = true;
     });
   }
 

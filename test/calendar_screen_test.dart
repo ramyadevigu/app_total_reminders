@@ -67,6 +67,38 @@ void main() {
     );
   });
 
+  testWidgets('selected date fills its cell and today keeps an outline', (
+    tester,
+  ) async {
+    await _pumpCalendar(tester, () => now, storage);
+    final colors = Theme.of(
+      tester.element(find.byKey(const ValueKey('calendar-day-cell-2026-9-29'))),
+    ).colorScheme;
+
+    AnimatedContainer dateCell(String key) =>
+        tester.widget<AnimatedContainer>(find.byKey(ValueKey(key)));
+
+    final todayDecoration =
+        dateCell('calendar-day-cell-2026-9-29').decoration! as BoxDecoration;
+    expect(todayDecoration.color, colors.primary);
+    expect(todayDecoration.border!.top.color, colors.onPrimary);
+
+    await tester.tap(find.byKey(const ValueKey('calendar-day-2026-9-30')));
+    await _pumpFrames(tester);
+
+    final selectedDecoration =
+        dateCell('calendar-day-cell-2026-9-30').decoration! as BoxDecoration;
+    expect(selectedDecoration.color, colors.primary);
+    expect(selectedDecoration.border, isNull);
+    final todayAfterSelection =
+        dateCell('calendar-day-cell-2026-9-29').decoration! as BoxDecoration;
+    expect(
+      todayAfterSelection.color,
+      colors.primaryContainer.withValues(alpha: 0.2),
+    );
+    expect(todayAfterSelection.border!.top.color, colors.primary);
+  });
+
   testWidgets('renders the month layout when selected', (tester) async {
     await _pumpCalendar(
       tester,
@@ -79,7 +111,7 @@ void main() {
     expect(find.byType(GridView), findsOneWidget);
   });
 
-  testWidgets('does not render daily reminders on the Calendar', (
+  testWidgets('renders daily and weekly reminders on the Calendar', (
     tester,
   ) async {
     final visibilityStorage = _TestReminderStorage([
@@ -99,7 +131,7 @@ void main() {
     ]);
     await _pumpCalendar(tester, () => now, visibilityStorage);
 
-    expect(find.text('Daily reminder'), findsNothing);
+    expect(find.text('Daily reminder'), findsOneWidget);
     expect(find.text('Weekly reminder'), findsNothing);
     expect(
       tester
@@ -108,7 +140,7 @@ void main() {
           )
           .properties
           .label,
-      contains('1 reminder'),
+      contains('2 reminders'),
     );
   });
 
@@ -253,7 +285,7 @@ void main() {
     expect(find.text('Tomorrow reminder'), findsOneWidget);
   });
 
-  testWidgets('month dates show agenda and week dates open day view', (
+  testWidgets('month and week date selection stays in its view', (
     tester,
   ) async {
     await _pumpCalendar(tester, () => now, storage);
@@ -284,10 +316,6 @@ void main() {
     await tester.tap(find.byTooltip('Back to Week'));
     await _pumpFrames(tester);
     await tester.tap(septemberThirtieth);
-    await _pumpFrames(tester);
-    expect(find.byKey(const ValueKey('calendar-view-day')), findsOneWidget);
-
-    await tester.tap(find.byTooltip('Back to Week'));
     await _pumpFrames(tester);
     expect(find.byKey(const ValueKey('calendar-view-week')), findsOneWidget);
     expect(
@@ -382,7 +410,7 @@ void main() {
     final grid = find.byKey(const ValueKey('calendar-month-grid'));
     final agenda = find.byKey(const ValueKey('calendar-list-content'));
     expect(grid, findsOneWidget);
-    expect(find.text('Countdown'), findsOneWidget);
+    expect(find.text('Upcoming Events'), findsOneWidget);
     expect(find.text('Weekly reminder'), findsWidgets);
     final gridTop = tester.getTopLeft(grid).dy;
 
@@ -398,6 +426,191 @@ void main() {
       greaterThan(0),
     );
     expect(tester.getTopLeft(grid).dy, closeTo(gridTop, 0.1));
+  });
+
+  testWidgets('upcoming list excludes daily recurrence and shows countdowns', (
+    tester,
+  ) async {
+    final upcomingStorage = _TestReminderStorage([
+      _reminder(
+        id: 'daily-countdown',
+        title: 'Daily countdown',
+        dateTime: DateTime(2026, 9, 28, 9),
+        type: RecurrenceType.daily,
+      ),
+      _reminder(
+        id: 'weekly-countdown',
+        title: 'Weekly countdown',
+        dateTime: DateTime(2026, 9, 28, 9),
+        type: RecurrenceType.weekly,
+        dayOfWeek: DateTime.friday,
+      ),
+      _reminder(
+        id: 'tomorrow-countdown',
+        title: 'Tomorrow countdown',
+        dateTime: DateTime(2026, 9, 30, 10),
+      ),
+    ]);
+    await _pumpCalendar(
+      tester,
+      () => now,
+      upcomingStorage,
+      viewMode: CalendarViewMode.list,
+    );
+
+    final list = find.byKey(const ValueKey('calendar-list-content'));
+    expect(
+      find.descendant(of: list, matching: find.text('Daily countdown')),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: list, matching: find.text('Weekly countdown')),
+      findsWidgets,
+    );
+    expect(
+      find.descendant(of: list, matching: find.text('Tomorrow countdown')),
+      findsOneWidget,
+    );
+    expect(find.text('In 3 days'), findsOneWidget);
+    expect(find.text('Tomorrow'), findsOneWidget);
+  });
+
+  testWidgets('week view shows each date and its own stacked events', (
+    tester,
+  ) async {
+    final weekStorage = _TestReminderStorage([
+      _reminder(
+        id: 'tuesday-event',
+        title: 'Tuesday event',
+        dateTime: DateTime(2026, 9, 29, 9),
+      ),
+      _reminder(
+        id: 'wednesday-event',
+        title: 'Wednesday event',
+        dateTime: DateTime(2026, 9, 30, 10),
+      ),
+      _reminder(
+        id: 'wednesday-event-later',
+        title: 'Wednesday later',
+        dateTime: DateTime(2026, 9, 30, 15),
+      ),
+    ]);
+    await _pumpCalendar(
+      tester,
+      () => now,
+      weekStorage,
+      viewMode: CalendarViewMode.week,
+    );
+
+    for (final date in [
+      DateTime(2026, 9, 28),
+      DateTime(2026, 9, 29),
+      DateTime(2026, 9, 30),
+      DateTime(2026, 10, 1),
+      DateTime(2026, 10, 2),
+      DateTime(2026, 10, 3),
+      DateTime(2026, 10, 4),
+    ]) {
+      expect(
+        find.byKey(
+          ValueKey(
+            'calendar-timeline-date-${date.year}-${date.month}-${date.day}',
+          ),
+        ),
+        findsOneWidget,
+      );
+    }
+
+    final tuesday = find.byKey(
+      const ValueKey('calendar-week-events-2026-9-29'),
+    );
+    final wednesday = find.byKey(
+      const ValueKey('calendar-week-events-2026-9-30'),
+    );
+    expect(
+      find.descendant(of: tuesday, matching: find.text('Tuesday event')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: wednesday, matching: find.text('Wednesday event')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: wednesday, matching: find.text('Wednesday later')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: tuesday, matching: find.text('Wednesday event')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('week navigation and swipes preserve selected weekday', (
+    tester,
+  ) async {
+    await _pumpCalendar(
+      tester,
+      () => now,
+      storage,
+      viewMode: CalendarViewMode.week,
+    );
+    await tester.tap(find.byKey(const ValueKey('calendar-next-week')));
+    await _pumpFrames(tester);
+    expect(
+      find.byKey(const ValueKey('calendar-timeline-date-2026-10-6')),
+      findsOneWidget,
+    );
+
+    await tester.drag(
+      find.byKey(const ValueKey('calendar-week-swipe-region')),
+      const Offset(-160, 0),
+    );
+    await _pumpFrames(tester);
+    expect(
+      find.byKey(const ValueKey('calendar-timeline-date-2026-10-13')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('calendar-week-today')));
+    await _pumpFrames(tester);
+    expect(
+      find.byKey(const ValueKey('calendar-timeline-date-2026-9-29')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('week layout fits a small dark-mode screen', (tester) async {
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    tester.view.physicalSize = const Size(360, 480);
+    tester.view.devicePixelRatio = 1;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(),
+        home: CalendarScreen(
+          storage: storage,
+          clock: () => now,
+          viewMode: CalendarViewMode.week,
+        ),
+      ),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.byKey(const ValueKey('calendar-view-week')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    final dateCell = tester.widget<AnimatedContainer>(
+      find.byKey(const ValueKey('calendar-week-date-cell-2026-9-29')),
+    );
+    final decoration = dateCell.decoration! as BoxDecoration;
+    final colors = Theme.of(
+      tester.element(
+        find.byKey(const ValueKey('calendar-week-date-cell-2026-9-29')),
+      ),
+    ).colorScheme;
+    expect(decoration.color, colors.primary);
+    expect(decoration.border!.top.color, colors.onPrimary);
   });
 
   testWidgets('list slides months in the navigation direction', (tester) async {

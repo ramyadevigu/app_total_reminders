@@ -23,10 +23,10 @@ bool shouldDisplayOnCalendar(Reminder reminder) {
           ? recurrence.weekdays
           : [recurrence.dayOfWeek ?? reminder.dateTime.weekday];
       return weekdays.every((weekday) => weekday >= 1 && weekday <= 7) &&
-          weekdays.toSet().length == 1;
+          weekdays.isNotEmpty;
     case RecurrenceType.daily:
     case RecurrenceType.yearly:
-      return false;
+      return recurrence.interval >= 1;
   }
 }
 

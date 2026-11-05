@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../theme/app_design_tokens.dart';
 import '../../reminders/services/reminder_storage.dart';
 import '../models/note_workspace_models.dart';
 import '../models/rich_note_draft.dart';
@@ -519,6 +520,9 @@ class _NotebookDetailScreenState extends State<NotebookDetailScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         key: const ValueKey('notebook-save-and-close'),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.compactCard),
+        ),
         onPressed: () {
           Navigator.of(context)
               .pop(NotebookDetailResult(updatedNotebook: _notebook));

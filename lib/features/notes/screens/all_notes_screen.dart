@@ -146,8 +146,8 @@ class _AllNotesScreenState extends State<AllNotesScreen> {
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: crossAxisCount,
                     mainAxisExtent: 176,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 6,
+                    mainAxisSpacing: 6,
                   ),
                   itemBuilder: (context, index) {
                     final note = _notes[index];

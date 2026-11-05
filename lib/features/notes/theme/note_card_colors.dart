@@ -103,13 +103,7 @@ const List<NoteCardColor> noteTextHighlightColors = [
 ];
 
 Color noteCardSurfaceColor(ThemeData theme, NoteCardColor noteColor) {
-  if (noteColor == NoteCardColor.standard) {
-    return theme.colorScheme.surfaceContainerLow;
-  }
-  final palette = theme.brightness == Brightness.light
-      ? lightNoteCardPalette
-      : darkNoteCardPalette;
-  return palette.colorFor(noteColor);
+  return theme.brightness == Brightness.light ? Colors.white : Colors.black;
 }
 
 Color noteCardForegroundColor(

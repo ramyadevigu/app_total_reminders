@@ -93,7 +93,7 @@ class AlarmRingingService : Service() {
             return
         }
         ringingId?.takeIf { it != id }?.let { previousId ->
-            finishAlarm(previousId, ACTION_STOP)
+            finishAlarm(previousId, ACTION_STOP, stopService = false)
         }
         ringingId = id
         AlarmScheduler.markActive(this, id)
@@ -113,7 +113,7 @@ class AlarmRingingService : Service() {
         AlarmScheduler.notifyRinging(this, id)
     }
 
-    private fun finishAlarm(id: Int, action: String) {
+    private fun finishAlarm(id: Int, action: String, stopService: Boolean = true) {
         if (ringingId != null && ringingId != id) {
             return
         }
@@ -134,14 +134,16 @@ class AlarmRingingService : Service() {
         AlarmScheduler.notifyStopped(this, id)
         AlarmScheduler.clearActive(this, id)
         ringingId = null
-        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
+        if (stopService) {
+            getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+            stopSelf()
         }
-        stopSelf()
     }
 
     private fun buildNotification(id: Int, reminder: JSONObject): Notification {

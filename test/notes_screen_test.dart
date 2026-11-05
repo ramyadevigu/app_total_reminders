@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:app_smarana/features/notes/models/note_workspace_models.dart';
 import 'package:app_smarana/features/notes/notes_screen.dart';
 import 'package:app_smarana/features/notes/services/note_workspace_storage.dart';
+import 'package:app_smarana/features/notes/theme/note_card_colors.dart';
 import 'package:app_smarana/features/notes/widgets/notebook_list_tile.dart';
 import 'package:app_smarana/features/notes/widgets/recent_note_card.dart';
 import 'package:app_smarana/features/reminders/models/reminder.dart';
@@ -15,6 +16,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+  });
+
+  test('note card surfaces are white in light mode and black in dark mode', () {
+    expect(
+      noteCardSurfaceColor(ThemeData.light(), NoteCardColor.pink),
+      Colors.white,
+    );
+    expect(
+      noteCardSurfaceColor(ThemeData.dark(), NoteCardColor.blue),
+      Colors.black,
+    );
   });
 
   testWidgets('Notes home starts in grid with persistent search and sorting', (
@@ -53,16 +65,14 @@ void main() {
     expect(find.text('Search notes'), findsOneWidget);
     expect(find.byKey(const ValueKey('notes-grid-view')), findsOneWidget);
     expect(find.byKey(const ValueKey('notes-list-view')), findsNothing);
-    expect(
-      (tester
-                  .widget<GridView>(
-                    find.byKey(const ValueKey('notes-grid-view')),
-                  )
-                  .gridDelegate
-              as SliverGridDelegateWithFixedCrossAxisCount)
-          .crossAxisCount,
-      2,
-    );
+    final gridDelegate =
+        tester
+                .widget<GridView>(find.byKey(const ValueKey('notes-grid-view')))
+                .gridDelegate
+            as SliverGridDelegateWithFixedCrossAxisCount;
+    expect(gridDelegate.crossAxisCount, 2);
+    expect(gridDelegate.crossAxisSpacing, 6);
+    expect(gridDelegate.mainAxisSpacing, 6);
 
     await tester.tap(find.byKey(const ValueKey('notes-view-toggle')));
     await tester.pumpAndSettle();
@@ -832,4 +842,54 @@ void main() {
     expect(find.byType(RecentNoteCard), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('failed note persistence is not shown as saved', (tester) async {
+    final now = DateTime(2026, 10, 1);
+    final workspaceStorage = _FailingNoteWorkspaceStorage(
+      notebook: Notebook(
+        id: defaultNotebookId,
+        name: defaultNotebookName,
+        iconType: NotebookIconType.general,
+        notes: const [],
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: NotesScreen(workspaceStorage: workspaceStorage)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('notes-add-note-fab')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('notes-quick-create-text')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('rich-note-title-field')),
+      'Unsaved draft',
+    );
+    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pump();
+
+    expect(find.text('Autosave failed'), findsOneWidget);
+    expect(find.text('Saved'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+class _FailingNoteWorkspaceStorage extends NoteWorkspaceStorage {
+  _FailingNoteWorkspaceStorage({required this.notebook});
+
+  final Notebook notebook;
+
+  @override
+  Future<List<Notebook>> loadWorkspace() async => [notebook];
+
+  @override
+  Future<void> saveWorkspace(
+    List<Notebook> notebooks, {
+    Map<String, NoteCardColor>? tagColors,
+  }) async {
+    throw Exception('Simulated storage write failure');
+  }
 }

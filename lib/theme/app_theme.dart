@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'app_colors.dart';
 import 'app_design_tokens.dart';
 
-const Color defaultAccentColor = Color(0xFF000000);
+const Color defaultAccentColor = Color(0xFF4D6D9E);
 
 ThemeData buildLightTheme([Color accentColor = defaultAccentColor]) =>
     _buildTheme(accentColor, brightness: Brightness.light);
@@ -17,7 +17,13 @@ final ThemeData darkTheme = buildDarkTheme();
 
 ThemeData _buildTheme(Color accentColor, {required Brightness brightness}) {
   final isLight = brightness == Brightness.light;
-  final primary = accentColor == defaultAccentColor && !isLight
+  final generatedColorScheme = ColorScheme.fromSeed(
+    seedColor: accentColor,
+    brightness: brightness,
+  );
+  final primary = !isLight && accentColor == defaultAccentColor
+      ? generatedColorScheme.primary
+      : !isLight && accentColor == Colors.black
       ? AppColors.white
       : accentColor;
   final onPrimary = AppColors.highContrastForeground(primary);
@@ -42,21 +48,20 @@ ThemeData _buildTheme(Color accentColor, {required Brightness brightness}) {
   final focusColor = isLight
       ? primary
       : Color.lerp(primary, AppColors.white, 0.18)!;
-  final colorScheme =
-      ColorScheme.fromSeed(seedColor: primary, brightness: brightness).copyWith(
-        primary: primary,
-        onPrimary: onPrimary,
-        surface: surface,
-        onSurface: onSurface,
-        surfaceContainerLowest: background,
-        surfaceContainerLow: surfaceLow,
-        surfaceContainer: surface,
-        surfaceContainerHigh: surfaceHigh,
-        surfaceContainerHighest: surfaceHigh,
-        onSurfaceVariant: onSurfaceVariant,
-        outline: outline,
-        outlineVariant: outlineVariant,
-      );
+  final colorScheme = generatedColorScheme.copyWith(
+    primary: primary,
+    onPrimary: onPrimary,
+    surface: surface,
+    onSurface: onSurface,
+    surfaceContainerLowest: background,
+    surfaceContainerLow: surfaceLow,
+    surfaceContainer: surface,
+    surfaceContainerHigh: surfaceHigh,
+    surfaceContainerHighest: surfaceHigh,
+    onSurfaceVariant: onSurfaceVariant,
+    outline: outline,
+    outlineVariant: outlineVariant,
+  );
   final textTheme =
       (isLight
               ? Typography.material2021().black
@@ -318,9 +323,7 @@ ThemeData _buildTheme(Color accentColor, {required Brightness brightness}) {
       focusElevation: 3,
       hoverElevation: 3,
       highlightElevation: 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.compactCard),
-      ),
+      shape: const CircleBorder(),
     ),
   );
 }

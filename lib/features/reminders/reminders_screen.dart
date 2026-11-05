@@ -4,12 +4,14 @@ import 'models/reminder.dart';
 import 'screens/add_reminder_screen.dart';
 import 'services/recurrence_service.dart';
 import 'services/reminder_storage.dart';
+import '../../widgets/app_navigation_drawer.dart';
 
 class RemindersScreen extends StatefulWidget {
   final ReminderStorage? storage;
   final String title;
   final Widget? appMenu;
   final Widget? navigationDrawer;
+  final bool useInternalNavigationDrawer;
 
   const RemindersScreen({
     super.key,
@@ -17,6 +19,7 @@ class RemindersScreen extends StatefulWidget {
     this.title = 'Reminders',
     this.appMenu,
     this.navigationDrawer,
+    this.useInternalNavigationDrawer = true,
   });
 
   @override
@@ -317,10 +320,22 @@ class _RemindersScreenState extends State<RemindersScreen> {
               ),
               if (!completed) ...[
                 const SizedBox(height: 20),
-                FilledButton.icon(
-                  onPressed: _openAddReminder,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add reminder'),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton.filledTonal(
+                      key: const ValueKey('reminders-empty-add'),
+                      tooltip: 'Add your first reminder',
+                      onPressed: _openAddReminder,
+                      icon: const Icon(Icons.add_rounded),
+                      style: IconButton.styleFrom(
+                        fixedSize: const Size.square(48),
+                        shape: const CircleBorder(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text('Add reminder', style: theme.textTheme.labelLarge),
+                  ],
                 ),
               ],
             ],
@@ -535,14 +550,16 @@ class _RemindersScreenState extends State<RemindersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      drawer: widget.navigationDrawer,
+      drawer: widget.useInternalNavigationDrawer
+          ? widget.navigationDrawer
+          : null,
       appBar: AppBar(
         title: Text(widget.title),
         leading: Builder(
           builder: (context) => IconButton(
             key: const ValueKey('global-navigation-button'),
             tooltip: 'Open navigation menu',
-            onPressed: () => Scaffold.of(context).openDrawer(),
+            onPressed: () => AppNavigationDrawerHost.openDrawer(context),
             icon: const Icon(Icons.menu_rounded),
           ),
         ),

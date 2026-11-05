@@ -1,4 +1,5 @@
 import 'package:app_smarana/app/app.dart';
+import 'package:app_smarana/theme/app_colors.dart';
 import 'package:app_smarana/theme/app_design_tokens.dart';
 import 'package:app_smarana/theme/app_theme.dart';
 import 'package:app_smarana/theme/theme_preference_store.dart';
@@ -18,14 +19,35 @@ void main() {
     );
   });
 
-  test('default theme uses black and white in both brightness modes', () {
+  test('floating add actions use a circular shape in both themes', () {
+    expect(
+      buildLightTheme().floatingActionButtonTheme.shape,
+      isA<CircleBorder>(),
+    );
+    expect(
+      buildDarkTheme().floatingActionButtonTheme.shape,
+      isA<CircleBorder>(),
+    );
+  });
+
+  test('default theme uses a tonal blue primary in both brightness modes', () {
     final lightTheme = buildLightTheme();
     final darkTheme = buildDarkTheme();
 
-    expect(lightTheme.colorScheme.primary, Colors.black);
-    expect(lightTheme.colorScheme.onPrimary, Colors.white);
-    expect(darkTheme.colorScheme.primary, Colors.white);
-    expect(darkTheme.colorScheme.onPrimary, Colors.black);
+    expect(lightTheme.colorScheme.primary, isNot(Colors.black));
+    expect(darkTheme.colorScheme.primary, isNot(Colors.black));
+    expect(
+      lightTheme.colorScheme.primary,
+      isNot(darkTheme.colorScheme.primary),
+    );
+    expect(
+      AppColors.highContrastForeground(lightTheme.colorScheme.primary),
+      lightTheme.colorScheme.onPrimary,
+    );
+    expect(
+      AppColors.highContrastForeground(darkTheme.colorScheme.primary),
+      darkTheme.colorScheme.onPrimary,
+    );
   });
 
   testWidgets('component motion respects reduced-motion preferences', (

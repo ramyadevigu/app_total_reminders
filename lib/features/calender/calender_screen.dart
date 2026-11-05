@@ -10,6 +10,7 @@ import 'services/calendar_service.dart';
 import 'theme/calendar_colors.dart';
 import '../../theme/app_design_tokens.dart';
 import '../../theme/premium_surface.dart';
+import '../../widgets/app_navigation_drawer.dart';
 
 const _calendarMonthNames = [
   'January',
@@ -60,6 +61,7 @@ class CalendarScreen extends StatefulWidget {
     this.onViewModeChanged,
     this.appMenu,
     this.navigationDrawer,
+    this.useInternalNavigationDrawer = true,
   });
 
   final ReminderStorage? storage;
@@ -68,6 +70,7 @@ class CalendarScreen extends StatefulWidget {
   final ValueChanged<CalendarViewMode>? onViewModeChanged;
   final Widget? appMenu;
   final Widget? navigationDrawer;
+  final bool useInternalNavigationDrawer;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -95,6 +98,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   VelocityTracker? _monthVelocityTracker;
   Axis? _monthDragAxis;
   int? _pendingMonthChange;
+  double _weekSwipeDelta = 0;
   bool _isMonthTransitioning = false;
   bool _skipNextMonthSwitcherTransition = false;
   bool _isLoading = true;
@@ -253,7 +257,12 @@ class _CalendarScreenState extends State<CalendarScreen>
     _upcomingOccurrences =
         countdownOccurrences.values
             .expand((occurrences) => occurrences)
-            .where((occurrence) => occurrence.dateTime.isAfter(now))
+            .where(
+              (occurrence) =>
+                  occurrence.dateTime.isAfter(now) &&
+                  occurrence.reminder.recurrenceRule.type !=
+                      RecurrenceType.daily,
+            )
             .toList()
           ..sort((first, second) => first.dateTime.compareTo(second.dateTime));
   }
@@ -390,11 +399,27 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   void _changePeriod(int offset) {
-    if (_activeViewMode != CalendarViewMode.year) {
-      _changeMonth(offset);
-      return;
+    switch (_activeViewMode) {
+      case CalendarViewMode.year:
+        _setYear(_displayedMonth.year + offset);
+      case CalendarViewMode.week:
+        _changeWeek(offset);
+      case CalendarViewMode.list:
+      case CalendarViewMode.month:
+      case CalendarViewMode.threeDay:
+      case CalendarViewMode.day:
+        _changeMonth(offset);
     }
-    _setYear(_displayedMonth.year + offset);
+  }
+
+  void _changeWeek(int offset) {
+    final selectedDate = _selectedDate.add(Duration(days: offset * 7));
+    setState(() {
+      _selectedDate = selectedDate;
+      _displayedMonth = DateTime(selectedDate.year, selectedDate.month);
+      _today = _dateOnly(widget.clock());
+      _refreshVisibleOccurrences();
+    });
   }
 
   void _setYear(int year) {
@@ -560,7 +585,9 @@ class _CalendarScreenState extends State<CalendarScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      drawer: widget.navigationDrawer,
+      drawer: widget.useInternalNavigationDrawer
+          ? widget.navigationDrawer
+          : null,
       appBar: _isLoading || _hasLoadError
           ? AppBar(
               title: const Text('Calendar'),
@@ -568,7 +595,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                 builder: (context) => IconButton(
                   key: const ValueKey('global-navigation-button'),
                   tooltip: 'Open navigation menu',
-                  onPressed: () => Scaffold.of(context).openDrawer(),
+                  onPressed: () => AppNavigationDrawerHost.openDrawer(context),
                   icon: const Icon(Icons.menu_rounded),
                 ),
               ),
@@ -729,7 +756,7 @@ class _CalendarScreenState extends State<CalendarScreen>
             const Divider(height: 1),
             Semantics(
               button: true,
-              label: 'Expand Countdown reminders',
+              label: 'Expand Upcoming Events',
               hint: 'Open the scrollable Countdown panel',
               child: InkWell(
                 key: const ValueKey('calendar-countdown-toggle'),
@@ -741,7 +768,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
-                          'Countdown',
+                          'Upcoming Events',
                           style: Theme.of(context).textTheme.titleSmall,
                         ),
                       ),
@@ -770,8 +797,8 @@ class _CalendarScreenState extends State<CalendarScreen>
   Widget _buildMonthView(BuildContext context, Key key) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final gridHeight = (constraints.maxHeight * 0.5)
-            .clamp(260.0, 360.0)
+        final gridHeight = (constraints.maxHeight * 0.58)
+            .clamp(280.0, 440.0)
             .toDouble();
         const selectedContentMinimumHeight = 180.0;
         final minimumContentHeight =
@@ -1370,15 +1397,25 @@ class _CalendarScreenState extends State<CalendarScreen>
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          subtitle:
-              reminder.description == null ||
-                  reminder.description!.trim().isEmpty
-              ? null
-              : Text(
-                  reminder.description!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _countdownLabel(occurrence.dateTime),
+                key: ValueKey(
+                  'calendar-countdown-${reminder.id}-${occurrence.dateTime}',
                 ),
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (reminder.description case final description?
+                  when description.trim().isNotEmpty)
+                Text(description, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
+          ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1424,6 +1461,31 @@ class _CalendarScreenState extends State<CalendarScreen>
     );
   }
 
+  String _countdownLabel(DateTime eventDateTime) {
+    final now = widget.clock();
+    final remaining = eventDateTime.difference(now);
+    final nowDate = DateTime.utc(now.year, now.month, now.day);
+    final eventDate = DateTime.utc(
+      eventDateTime.year,
+      eventDateTime.month,
+      eventDateTime.day,
+    );
+    final calendarDays = eventDate.difference(nowDate).inDays;
+    if (calendarDays == 1) {
+      return 'Tomorrow';
+    }
+    if (calendarDays > 1) {
+      return 'In $calendarDays days';
+    }
+
+    final minutes = (remaining.inSeconds / Duration.secondsPerMinute).ceil();
+    if (minutes < Duration.minutesPerHour) {
+      return minutes == 1 ? 'In 1 minute' : 'In $minutes minutes';
+    }
+    final hours = (minutes / Duration.minutesPerHour).ceil();
+    return hours == 1 ? 'In 1 hour' : 'In $hours hours';
+  }
+
   Widget _buildTimelineView(
     BuildContext context,
     CalendarViewMode mode,
@@ -1449,17 +1511,22 @@ class _CalendarScreenState extends State<CalendarScreen>
     );
     final theme = Theme.of(context);
     final localizations = MaterialLocalizations.of(context);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final dateRowHeight = (constraints.maxHeight - 42)
-            .clamp(0.0, 104.0)
-            .toDouble();
-        return Column(
-          key: key,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    final colors = theme.colorScheme;
+    final weekStart = _weekStart(_selectedDate);
+    return Column(
+      key: key,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+            IconButton(
+              key: const ValueKey('calendar-previous-week'),
+              tooltip: 'Previous week',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _changeWeek(-1),
+              icon: const Icon(Icons.chevron_left),
+            ),
+            Expanded(
               child: Text(
                 '${localizations.formatShortDate(dates.first)} – '
                 '${localizations.formatShortDate(dates.last)}',
@@ -1467,24 +1534,99 @@ class _CalendarScreenState extends State<CalendarScreen>
                 style: theme.textTheme.titleSmall,
               ),
             ),
-            SizedBox(
-              height: dateRowHeight,
+            TextButton(
+              key: const ValueKey('calendar-week-today'),
+              onPressed: _returnToToday,
+              child: const Text('Today'),
+            ),
+            IconButton(
+              key: const ValueKey('calendar-next-week'),
+              tooltip: 'Next week',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _changeWeek(1),
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        ),
+        SizedBox(
+          height: 66,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final date in dates)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 1),
+                    child: _buildWeekDaySummary(context, date),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Divider(height: 1, color: colors.outlineVariant),
+        Expanded(
+          child: GestureDetector(
+            key: const ValueKey('calendar-week-swipe-region'),
+            behavior: HitTestBehavior.translucent,
+            onHorizontalDragStart: (_) => _weekSwipeDelta = 0,
+            onHorizontalDragUpdate: (details) {
+              _weekSwipeDelta += details.delta.dx;
+            },
+            onHorizontalDragEnd: (details) {
+              final delta = _weekSwipeDelta;
+              final velocity = details.primaryVelocity ?? 0;
+              _weekSwipeDelta = 0;
+              if (delta.abs() >= 48 || velocity.abs() >= 700) {
+                _changeWeek((delta != 0 ? delta : velocity) < 0 ? 1 : -1);
+              }
+            },
+            child: AnimatedSwitcher(
+              duration: AppMotion.resolve(context, AppMotion.screen),
               child: Row(
+                key: ValueKey('calendar-week-columns-$weekStart'),
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final date in dates)
+                  for (var index = 0; index < dates.length; index++)
                     Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 1.5),
-                        child: _buildWeekDaySummary(context, date),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border(
+                            right: BorderSide(
+                              color: colors.outlineVariant.withValues(
+                                alpha: 0.55,
+                              ),
+                            ),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Expanded(
+                              child: ListView.builder(
+                                key: ValueKey(
+                                  'calendar-week-events-'
+                                  '${dates[index].year}-'
+                                  '${dates[index].month}-'
+                                  '${dates[index].day}',
+                                ),
+                                padding: const EdgeInsets.fromLTRB(1, 4, 1, 32),
+                                itemCount: _occurrencesFor(dates[index]).length,
+                                itemBuilder: (context, eventIndex) =>
+                                    _buildWeekEvent(
+                                      context,
+                                      _occurrencesFor(dates[index])[eventIndex],
+                                    ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                 ],
               ),
             ),
-          ],
-        );
-      },
+          ),
+        ),
+      ],
     );
   }
 
@@ -1503,97 +1645,164 @@ class _CalendarScreenState extends State<CalendarScreen>
       selected: selected,
       label: [
         localizations.formatFullDate(date),
+        if (today) 'today',
         if (selected) 'selected',
         count == 0
             ? 'No reminders'
             : '$count ${count == 1 ? 'reminder' : 'reminders'}',
       ].join(', '),
-      hint: 'Open day schedule',
+      hint: 'Select date',
       child: Tooltip(
         message: count == 0
             ? 'No reminders'
             : '$count ${count == 1 ? 'reminder' : 'reminders'}',
-        child: InkWell(
-          onTap: () => _openDayDetails(date),
-          borderRadius: BorderRadius.circular(12),
-          child: AnimatedContainer(
-            duration: AppMotion.resolve(context, AppMotion.interaction),
-            decoration: BoxDecoration(
-              color: selected ? colors.primaryContainer : colors.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: selected
-                    ? colors.primary.withValues(alpha: 0.55)
-                    : colors.outlineVariant.withValues(alpha: 0.5),
-              ),
-            ),
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 1),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  _calendarShortWeekdayNames[date.weekday % 7],
-                  maxLines: 1,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: selected ? colors.primary : colors.onSurfaceVariant,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: selected ? colors.primary : Colors.transparent,
-                    border: today && !selected
-                        ? Border.all(color: colors.primary)
-                        : null,
-                  ),
-                  child: SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: Center(
-                      child: Text(
-                        '${date.day}',
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: selected ? colors.onPrimary : colors.onSurface,
-                          fontWeight: selected || today
-                              ? FontWeight.w700
-                              : FontWeight.w500,
-                        ),
-                      ),
+        child: AnimatedContainer(
+          key: ValueKey(
+            'calendar-week-date-cell-${date.year}-${date.month}-${date.day}',
+          ),
+          duration: AppMotion.resolve(context, AppMotion.interaction),
+          decoration: BoxDecoration(
+            color: selected
+                ? colors.primary
+                : today
+                ? colors.primaryContainer.withValues(alpha: 0.22)
+                : null,
+            borderRadius: BorderRadius.circular(8),
+            border: today
+                ? Border.all(
+                    color: selected ? colors.onPrimary : colors.primary,
+                    width: 1.5,
+                  )
+                : null,
+          ),
+          child: InkWell(
+            onTap: () => _selectDate(date),
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              height: 66,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _calendarShortWeekdayNames[date.weekday % 7],
+                    maxLines: 1,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: selected
+                          ? colors.onPrimary
+                          : colors.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 9,
                     ),
                   ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${date.day}',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: selected
+                          ? colors.onPrimary
+                          : today
+                          ? colors.primary
+                          : colors.onSurface,
+                      fontWeight: selected || today
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWeekEvent(BuildContext context, CalendarOccurrence occurrence) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final colors = CalendarColors.forReminder(occurrence.reminder.id);
+    final time = MaterialLocalizations.of(context).formatTimeOfDay(
+      TimeOfDay.fromDateTime(occurrence.dateTime),
+      alwaysUse24HourFormat: true,
+    );
+    final reminder = occurrence.reminder;
+    final isRecurring = reminder.recurrenceRule.type != RecurrenceType.none;
+    final isAlarm =
+        reminder.notificationMode ==
+        ReminderNotificationMode.alarmAndNotification;
+    return Semantics(
+      key: ValueKey(
+        'calendar-week-event-${reminder.id}-${occurrence.dateTime}',
+      ),
+      button: true,
+      label: [
+        time,
+        reminder.title,
+        if (isRecurring) 'repeats',
+        if (isAlarm) 'alarm',
+      ].join(', '),
+      child: Tooltip(
+        message: '${reminder.title}, $time',
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Material(
+            color: colors.surface(dark),
+            borderRadius: BorderRadius.circular(5),
+            child: InkWell(
+              onTap: () => _openEditReminder(reminder),
+              borderRadius: BorderRadius.circular(5),
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 48),
+                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(5),
+                  border: Border(
+                    left: BorderSide(color: colors.foreground(dark), width: 2),
+                  ),
                 ),
-                SizedBox(
-                  height: 20,
-                  child: count == 0
-                      ? Icon(
-                          Icons.remove_rounded,
-                          size: 14,
-                          color: colors.onSurfaceVariant.withValues(alpha: 0.6),
-                        )
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      time,
+                      maxLines: 1,
+                      overflow: TextOverflow.clip,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: colors.foreground(dark),
+                        fontSize: 8,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      reminder.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurface,
+                        fontSize: 9,
+                        height: 1.1,
+                      ),
+                    ),
+                    if (isRecurring || isAlarm)
+                      Row(
+                        children: [
+                          if (isRecurring)
                             Icon(
-                              Icons.notifications_none_rounded,
-                              size: 12,
-                              color: colors.primary,
+                              Icons.repeat_rounded,
+                              size: 9,
+                              color: colors.foreground(dark),
                             ),
-                            Flexible(
-                              child: Text(
-                                '$count',
-                                maxLines: 1,
-                                overflow: TextOverflow.clip,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: colors.primary,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
+                          if (isAlarm)
+                            Icon(
+                              Icons.alarm_outlined,
+                              size: 9,
+                              color: colors.foreground(dark),
                             ),
-                          ],
-                        ),
+                        ],
+                      ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -1952,7 +2161,7 @@ class _CalendarScreenState extends State<CalendarScreen>
               key: const ValueKey('global-navigation-button'),
               tooltip: 'Open navigation menu',
               visualDensity: VisualDensity.compact,
-              onPressed: () => Scaffold.of(context).openDrawer(),
+              onPressed: () => AppNavigationDrawerHost.openDrawer(context),
               icon: const Icon(Icons.menu_rounded),
             ),
           ),
@@ -1985,16 +2194,39 @@ class _CalendarScreenState extends State<CalendarScreen>
                   alignment: Alignment.centerLeft,
                   child: AnimatedSwitcher(
                     duration: AppMotion.resolve(context, AppMotion.interaction),
-                    child: Text(
-                      monthTitle,
+                    child: Row(
                       key: ValueKey(
                         'calendar-month-title-${_displayedMonth.year}-'
                         '${_displayedMonth.month}',
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium
-                          ?.copyWith(fontSize: 21, fontWeight: FontWeight.w600),
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            monthTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
+                        if (_activeViewMode != CalendarViewMode.year) ...[
+                          const SizedBox(width: 6),
+                          Text(
+                            '${_displayedMonth.year}',
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
@@ -2030,9 +2262,11 @@ class _CalendarScreenState extends State<CalendarScreen>
         }
       },
       itemBuilder: (context) {
-        final period = _activeViewMode == CalendarViewMode.year
-            ? 'year'
-            : 'month';
+        final period = switch (_activeViewMode) {
+          CalendarViewMode.year => 'year',
+          CalendarViewMode.week => 'week',
+          _ => 'month',
+        };
         return [
           const PopupMenuItem(
             value: 'countdown',
@@ -2300,7 +2534,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     final markerExtent = compact
         ? 11.0
         : eventAreaHeight <= 12
-        ? (eventAreaHeight * 3.6).clamp(20.0, 34.0).toDouble()
+        ? (eventAreaHeight * 3).clamp(17.0, 30.0).toDouble()
         : 36.0;
     final dateColor = !inDisplayedMonth
         ? colors.onSurfaceVariant.withValues(alpha: 0.45)
@@ -2330,137 +2564,159 @@ class _CalendarScreenState extends State<CalendarScreen>
         if (eventCount > 0)
           '$eventCount ${eventCount == 1 ? 'reminder' : 'reminders'}',
       ].join(', '),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(28),
-        onTap: () {
-          if (tapOpensDay) {
-            _openDayDetails(date);
-          } else {
-            _selectDate(date);
-          }
-        },
-        onDoubleTap: () {
-          if (monthOnly && !tapOpensDay) {
-            _selectDate(date);
-            _selectViewMode(CalendarViewMode.week);
-          }
-        },
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            compact ? 1 : 2,
-            compact ? 0 : 2,
-            compact ? 1 : 2,
-            compact ? 0 : 1,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              AnimatedContainer(
-                key: ValueKey(
-                  'calendar-day-marker-${date.year}-${date.month}-${date.day}',
-                ),
-                duration: AppMotion.resolve(context, AppMotion.interaction),
-                curve: Curves.easeOutCubic,
-                width: markerExtent,
-                height: markerExtent,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: selected ? colors.primary : Colors.transparent,
-                  border: today && !selected
-                      ? Border.all(
-                          color: colors.primary.withValues(alpha: 0.7),
-                          width: 1,
-                        )
-                      : null,
-                ),
-                child: AnimatedDefaultTextStyle(
+      child: AnimatedContainer(
+        key: ValueKey(
+          'calendar-day-cell-${date.year}-${date.month}-${date.day}',
+        ),
+        duration: AppMotion.resolve(context, AppMotion.interaction),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          color: selected
+              ? colors.primary
+              : today
+              ? colors.primaryContainer.withValues(alpha: 0.2)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: today
+              ? Border.all(
+                  color: selected ? colors.onPrimary : colors.primary,
+                  width: 1.5,
+                )
+              : null,
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () {
+            if (tapOpensDay) {
+              _openDayDetails(date);
+            } else {
+              _selectDate(date);
+            }
+          },
+          onDoubleTap: () {
+            if (monthOnly && !tapOpensDay) {
+              _selectDate(date);
+              _selectViewMode(CalendarViewMode.week);
+            }
+          },
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              compact ? 1 : 2,
+              compact ? 0 : 2,
+              compact ? 1 : 2,
+              compact ? 0 : 1,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                AnimatedContainer(
+                  key: ValueKey(
+                    'calendar-day-marker-${date.year}-${date.month}-${date.day}',
+                  ),
                   duration: AppMotion.resolve(context, AppMotion.interaction),
                   curve: Curves.easeOutCubic,
-                  style:
-                      (compact
-                              ? theme.textTheme.labelSmall
-                              : theme.textTheme.labelMedium ??
-                                    theme.textTheme.bodyMedium ??
-                                    const TextStyle())!
-                          .copyWith(
-                            color: selected ? colors.onPrimary : dateColor,
-                            fontWeight: selected || today
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                            fontSize: compact ? 7 : 16,
-                            height: compact ? 1 : null,
-                          ),
-                  child: Text(
-                    key: ValueKey(
-                      'calendar-day-number-${date.year}-${date.month}-${date.day}',
+                  width: markerExtent,
+                  height: markerExtent,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(shape: BoxShape.circle),
+                  child: AnimatedDefaultTextStyle(
+                    duration: AppMotion.resolve(context, AppMotion.interaction),
+                    curve: Curves.easeOutCubic,
+                    style:
+                        (compact
+                                ? theme.textTheme.labelSmall
+                                : theme.textTheme.labelMedium ??
+                                      theme.textTheme.bodyMedium ??
+                                      const TextStyle())!
+                            .copyWith(
+                              color: selected ? colors.onPrimary : dateColor,
+                              fontWeight: selected || today
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              fontSize: compact ? 7 : 16,
+                              height: compact ? 1 : null,
+                            ),
+                    child: Text(
+                      key: ValueKey(
+                        'calendar-day-number-${date.year}-${date.month}-${date.day}',
+                      ),
+                      MaterialLocalizations.of(context).formatDecimal(date.day),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      softWrap: false,
                     ),
-                    MaterialLocalizations.of(context).formatDecimal(date.day),
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    softWrap: false,
                   ),
                 ),
-              ),
-              if (monthOnly)
-                SizedBox(
-                  key: ValueKey(
-                    'calendar-month-event-area-${date.year}-'
-                    '${date.month}-${date.day}',
-                  ),
-                  height: eventAreaHeight,
-                  child: _buildMonthCellEvents(
-                    context,
-                    occurrences,
-                    compact: compact,
-                    eventAreaHeight: eventAreaHeight,
-                  ),
-                )
-              else if (compact)
-                SizedBox(
-                  height: 1,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      for (final occurrence in occurrences.take(3))
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 1),
-                          child: Container(
-                            width: 2,
-                            height: 2,
-                            decoration: BoxDecoration(
-                              color: CalendarColors.forReminder(
-                                occurrence.reminder.id,
-                              ).foreground(theme.brightness == Brightness.dark),
-                              shape: BoxShape.circle,
+                if (monthOnly)
+                  SizedBox(
+                    key: ValueKey(
+                      'calendar-month-event-area-${date.year}-'
+                      '${date.month}-${date.day}',
+                    ),
+                    height: eventAreaHeight,
+                    child: _buildMonthCellEvents(
+                      context,
+                      occurrences,
+                      compact: compact,
+                      eventAreaHeight: eventAreaHeight,
+                      selected: selected,
+                    ),
+                  )
+                else if (compact)
+                  SizedBox(
+                    height: 1,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        for (final occurrence in occurrences.take(3))
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 1),
+                            child: Container(
+                              width: 2,
+                              height: 2,
+                              decoration: BoxDecoration(
+                                color:
+                                    CalendarColors.forReminder(
+                                      occurrence.reminder.id,
+                                    ).foreground(
+                                      theme.brightness == Brightness.dark,
+                                    ),
+                                shape: BoxShape.circle,
+                                border: selected
+                                    ? Border.all(color: colors.onPrimary)
+                                    : null,
+                              ),
                             ),
+                          ),
+                      ],
+                    ),
+                  )
+                else ...[
+                  const SizedBox(height: 2),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 3,
+                    runSpacing: 2,
+                    children: [
+                      for (final occurrence in occurrences.take(4))
+                        Container(
+                          width: 5,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: CalendarColors.forReminder(
+                              occurrence.reminder.id,
+                            ).foreground(theme.brightness == Brightness.dark),
+                            shape: BoxShape.circle,
+                            border: selected
+                                ? Border.all(color: colors.onPrimary)
+                                : null,
                           ),
                         ),
                     ],
                   ),
-                )
-              else ...[
-                const SizedBox(height: 2),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 3,
-                  runSpacing: 2,
-                  children: [
-                    for (final occurrence in occurrences.take(4))
-                      Container(
-                        width: 5,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: CalendarColors.forReminder(
-                            occurrence.reminder.id,
-                          ).foreground(theme.brightness == Brightness.dark),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                  ],
-                ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -2472,6 +2728,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     List<CalendarOccurrence> occurrences, {
     required bool compact,
     required double eventAreaHeight,
+    required bool selected,
   }) {
     final theme = Theme.of(context);
     if (occurrences.isEmpty) {
@@ -2493,6 +2750,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                     color: CalendarColors.forReminder(occurrence.reminder.id)
                         .foreground(theme.brightness == Brightness.dark),
                     shape: BoxShape.circle,
+                    border: selected
+                        ? Border.all(color: theme.colorScheme.onPrimary)
+                        : null,
                   ),
                 ),
               ),
@@ -2509,7 +2769,9 @@ class _CalendarScreenState extends State<CalendarScreen>
         style: theme.textTheme.labelSmall?.copyWith(
           fontSize: compact || eventAreaHeight < 10 ? 7 : 9,
           height: 1,
-          color: theme.colorScheme.onSurfaceVariant,
+          color: selected
+              ? theme.colorScheme.onPrimary
+              : theme.colorScheme.onSurfaceVariant,
           fontWeight: FontWeight.w600,
         ),
       ),

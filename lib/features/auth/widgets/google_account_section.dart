@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../screens/profile_screen.dart';
 import '../services/google_auth_service.dart';
+import '../services/profile_name_store.dart';
 import 'google_profile_avatar.dart';
 
 class GoogleAccountSection extends StatefulWidget {
@@ -15,8 +16,27 @@ class GoogleAccountSection extends StatefulWidget {
 
 class _GoogleAccountSectionState extends State<GoogleAccountSection> {
   bool _isBusy = false;
+  String? _loadingProfileNameFor;
 
   GoogleAuthService get _authService => GoogleAuthService.instance;
+
+  void _loadProfileName(User user) {
+    if (_loadingProfileNameFor == user.uid) {
+      return;
+    }
+    _loadingProfileNameFor = user.uid;
+    ProfileNameStore.instance
+        .load(userId: user.uid, googleName: user.displayName ?? '')
+        .catchError((Object error, StackTrace stackTrace) {
+          FlutterError.reportError(
+            FlutterErrorDetails(
+              exception: error,
+              stack: stackTrace,
+              library: 'Profile name loading',
+            ),
+          );
+        });
+  }
 
   Future<void> _signIn() async {
     if (_isBusy) {
@@ -62,6 +82,11 @@ class _GoogleAccountSectionState extends State<GoogleAccountSection> {
       initialData: _authService.currentUser,
       builder: (context, snapshot) {
         final user = snapshot.data;
+        if (user != null) {
+          _loadProfileName(user);
+        } else {
+          _loadingProfileNameFor = null;
+        }
         return Padding(
           padding: const EdgeInsets.only(top: 24),
           child: Column(
@@ -151,32 +176,42 @@ class _SignedInAccountCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Card(
-      elevation: 1,
-      child: ListTile(
-        key: const ValueKey('user-profile-settings-card'),
-        onTap: onTap,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: GoogleProfileAvatar(user: user, radius: 24),
-        title: Text(
-          user.displayName?.trim().isNotEmpty == true
-              ? user.displayName!.trim()
-              : 'Google account',
-          style: Theme.of(context).textTheme.titleMedium
-              ?.copyWith(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          user.email?.trim().isNotEmpty == true
-              ? user.email!.trim()
-              : 'Email unavailable',
-          style: Theme.of(context).textTheme.bodyMedium
-              ?.copyWith(color: colorScheme.onSurfaceVariant),
-        ),
-        trailing: Icon(
-          Icons.chevron_right,
-          color: colorScheme.onSurfaceVariant,
-        ),
-      ),
+    return AnimatedBuilder(
+      animation: ProfileNameStore.instance,
+      builder: (context, child) {
+        final displayName = ProfileNameStore.instance.nameFor(
+          userId: user.uid,
+          googleName: user.displayName ?? '',
+        );
+        return Card(
+          elevation: 1,
+          child: ListTile(
+            key: const ValueKey('user-profile-settings-card'),
+            onTap: onTap,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 8,
+            ),
+            leading: GoogleProfileAvatar(user: user, radius: 24),
+            title: Text(
+              displayName,
+              style: Theme.of(context).textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            subtitle: Text(
+              user.email?.trim().isNotEmpty == true
+                  ? user.email!.trim()
+                  : 'Email unavailable',
+              style: Theme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: colorScheme.onSurfaceVariant),
+            ),
+            trailing: Icon(
+              Icons.chevron_right,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        );
+      },
     );
   }
 }

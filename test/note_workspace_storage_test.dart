@@ -108,13 +108,169 @@ void main() {
     expect(restored.notes.single.updatedAt, updatedAt);
   });
 
-  test('keeps the default notebook available for corrupted data', () async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString('smarana_note_workspace_v1', '{invalid');
+  test(
+    'preserves corrupted workspace data and refuses to overwrite it',
+    () async {
+      final preferences = await SharedPreferences.getInstance();
+      const raw = '{invalid';
+      await preferences.setString('smarana_note_workspace_v1', raw);
 
-    final notebooks = await storage.loadWorkspace();
-    expect(notebooks, hasLength(1));
-    expect(notebooks.single.name, defaultNotebookName);
+      await expectLater(storage.saveWorkspace([]), throwsFormatException);
+      await expectLater(storage.loadWorkspace(), throwsFormatException);
+      expect(preferences.getString('smarana_note_workspace_v1'), raw);
+    },
+  );
+
+  test('does not overwrite a workspace from a newer schema version', () async {
+    final preferences = await SharedPreferences.getInstance();
+    const raw = '{"version":999,"notebooks":[{"future":"data"}]}';
+    await preferences.setString('smarana_note_workspace_v1', raw);
+
+    await expectLater(storage.saveWorkspace([]), throwsFormatException);
+    await expectLater(storage.loadWorkspace(), throwsFormatException);
+    expect(preferences.getString('smarana_note_workspace_v1'), raw);
+  });
+
+  test('preserves workspace data with malformed nested attachments', () async {
+    final preferences = await SharedPreferences.getInstance();
+    final now = DateTime(2026, 10, 1);
+    final note = NoteEntry(
+      id: 'note-with-attachment',
+      notebookId: defaultNotebookId,
+      title: 'Attachment',
+      content: '',
+      createdAt: now,
+      updatedAt: now,
+    ).toJson();
+    note['attachments'] = ['unreadable attachment'];
+    final notebook = Notebook(
+      id: defaultNotebookId,
+      name: defaultNotebookName,
+      iconType: NotebookIconType.general,
+      notes: const [],
+      createdAt: now,
+      updatedAt: now,
+    ).toJson();
+    notebook['notes'] = [note];
+    final raw = jsonEncode({
+      'version': 4,
+      'notebooks': [notebook],
+      'tagColors': <String, String>{},
+    });
+    await preferences.setString('smarana_note_workspace_v1', raw);
+
+    await expectLater(storage.loadWorkspace(), throwsFormatException);
+    await expectLater(storage.saveWorkspace([]), throwsFormatException);
+    expect(preferences.getString('smarana_note_workspace_v1'), raw);
+  });
+
+  test('preserves workspace data with malformed attachment fields', () async {
+    final preferences = await SharedPreferences.getInstance();
+    final now = DateTime(2026, 10, 1);
+    final note = NoteEntry(
+      id: 'note-with-attachment',
+      notebookId: defaultNotebookId,
+      title: 'Attachment',
+      content: '',
+      createdAt: now,
+      updatedAt: now,
+    ).toJson();
+    note['attachments'] = [
+      {
+        'id': 7,
+        'name': 'agenda.pdf',
+        'path': '/local/agenda.pdf',
+        'type': 'unsupported',
+        'addedAt': now.toIso8601String(),
+      },
+    ];
+    final notebook = Notebook(
+      id: defaultNotebookId,
+      name: defaultNotebookName,
+      iconType: NotebookIconType.general,
+      notes: const [],
+      createdAt: now,
+      updatedAt: now,
+    ).toJson();
+    notebook['notes'] = [note];
+    final raw = jsonEncode({
+      'version': 4,
+      'notebooks': [notebook],
+      'tagColors': <String, String>{},
+    });
+    await preferences.setString('smarana_note_workspace_v1', raw);
+
+    await expectLater(storage.loadWorkspace(), throwsFormatException);
+    await expectLater(storage.saveWorkspace([]), throwsFormatException);
+    expect(preferences.getString('smarana_note_workspace_v1'), raw);
+  });
+
+  test('preserves malformed saved tag colors', () async {
+    final preferences = await SharedPreferences.getInstance();
+    final now = DateTime(2026, 10, 1);
+    final notebook = Notebook(
+      id: defaultNotebookId,
+      name: defaultNotebookName,
+      iconType: NotebookIconType.general,
+      notes: const [],
+      createdAt: now,
+      updatedAt: now,
+    );
+    final raw = jsonEncode({
+      'version': 4,
+      'notebooks': [notebook.toJson()],
+      'tagColors': {'work': 42},
+    });
+    await preferences.setString('smarana_note_workspace_v1', raw);
+
+    await expectLater(storage.loadWorkspace(), throwsFormatException);
+    await expectLater(storage.saveWorkspace([notebook]), throwsFormatException);
+    expect(preferences.getString('smarana_note_workspace_v1'), raw);
+  });
+
+  test('blocks saves after a migration write fails', () async {
+    final preferences = await SharedPreferences.getInstance();
+    const raw =
+        '{"version":1,"notebooks":[{"id":"legacy","name":"Legacy","notes":[]}]}';
+    await preferences.setString('smarana_note_workspace_v1', raw);
+    var writes = 0;
+    final storage = NoteWorkspaceStorage(
+      saveString: (key, value) async {
+        writes++;
+        if (writes == 1) {
+          return false;
+        }
+        return preferences.setString(key, value);
+      },
+    );
+
+    await expectLater(storage.loadWorkspace(), throwsA(isA<Exception>()));
+    await expectLater(
+      storage.saveWorkspace([
+        Notebook(
+          id: defaultNotebookId,
+          name: defaultNotebookName,
+          iconType: NotebookIconType.general,
+          notes: const [],
+          createdAt: DateTime(2026, 10, 1),
+          updatedAt: DateTime(2026, 10, 1),
+        ),
+      ]),
+      throwsFormatException,
+    );
+    expect(preferences.getString('smarana_note_workspace_v1'), raw);
+
+    final recovered = await storage.loadWorkspace();
+    expect(
+      recovered.any((notebook) => notebook.id == defaultNotebookId),
+      isTrue,
+    );
+    expect(
+      (jsonDecode(preferences.getString('smarana_note_workspace_v1')!)
+          as Map)['version'],
+      4,
+    );
+    await storage.saveWorkspace(recovered);
   });
 
   test(
