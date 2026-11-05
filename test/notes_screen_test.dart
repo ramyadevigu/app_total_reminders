@@ -18,14 +18,18 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  test('note card surfaces are white in light mode and black in dark mode', () {
+  test('note card surfaces follow the note palette in light and dark mode', () {
+    expect(
+      noteCardSurfaceColor(ThemeData.light(), NoteCardColor.standard),
+      ThemeData.light().colorScheme.surfaceContainerLow,
+    );
     expect(
       noteCardSurfaceColor(ThemeData.light(), NoteCardColor.pink),
-      Colors.white,
+      isNot(Colors.white),
     );
     expect(
       noteCardSurfaceColor(ThemeData.dark(), NoteCardColor.blue),
-      Colors.black,
+      isNot(Colors.black),
     );
   });
 

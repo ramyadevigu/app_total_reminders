@@ -6,6 +6,7 @@ enum NoteEditorInsertAction {
   recording,
   drawing,
   tickBoxes,
+  table,
 }
 
 enum NoteEditorMoreAction {
@@ -40,18 +41,20 @@ class NoteEditorInsertSheet extends StatelessWidget {
       top: false,
       child: Padding(
         padding: const EdgeInsets.only(top: 12, bottom: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final item in _insertActions)
-              ListTile(
-                minVerticalPadding: 12,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 28),
-                leading: Icon(item.$2),
-                title: Text(item.$1),
-                onTap: () => Navigator.of(context).pop(item.$3),
-              ),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final item in _insertActions)
+                ListTile(
+                  minVerticalPadding: 12,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 28),
+                  leading: Icon(item.$2),
+                  title: Text(item.$1),
+                  onTap: () => Navigator.of(context).pop(item.$3),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -64,6 +67,7 @@ const _insertActions = [
   ('Recording', Icons.mic_none_rounded, NoteEditorInsertAction.recording),
   ('Drawing', Icons.brush_outlined, NoteEditorInsertAction.drawing),
   ('Tick boxes', Icons.check_box_outlined, NoteEditorInsertAction.tickBoxes),
+  ('Insert table', Icons.table_chart_outlined, NoteEditorInsertAction.table),
 ];
 
 class NoteEditorMoreSheet extends StatelessWidget {

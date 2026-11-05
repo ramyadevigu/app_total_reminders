@@ -1763,6 +1763,9 @@ class _RichNoteEditorScreenState extends State<RichNoteEditorScreen> {
       case NoteEditorInsertAction.tickBoxes:
         _toggleInlineAttribute(quill.Attribute.unchecked);
         break;
+      case NoteEditorInsertAction.table:
+        _insertTableTemplate();
+        break;
     }
   }
 

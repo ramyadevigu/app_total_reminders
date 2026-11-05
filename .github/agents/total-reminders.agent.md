@@ -1,7 +1,7 @@
 ---
 name: Total Reminders Agent
 target: vscode
-model: GPT-6 Luna (copilot)
+model: Claude Haiku 5.5 (copilot)
 applyTo: "**"
 description: "Project-wide GitHub Copilot agent instructions for the Total Reminders Flutter application"
 tools: [vscode, execute, read, agent, edit, search, web, browser, todo]
