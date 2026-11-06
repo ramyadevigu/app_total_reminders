@@ -6,6 +6,7 @@ import '../models/reminder.dart';
 import '../services/reminder_storage.dart';
 import '../../../services/notification_service.dart';
 import '../../settings/services/reminder_preferences_store.dart';
+import '../../../widgets/app_navigation_drawer.dart';
 
 const _monthLabels = [
   'January',
@@ -27,6 +28,7 @@ class AddReminderScreen extends StatefulWidget {
   final ReminderStorage? storage;
   final ReminderPreferencesStore? preferencesStore;
   final DateTime? initialDate;
+  final Widget? navigationDrawer;
 
   const AddReminderScreen({
     super.key,
@@ -34,6 +36,7 @@ class AddReminderScreen extends StatefulWidget {
     this.storage,
     this.preferencesStore,
     this.initialDate,
+    this.navigationDrawer,
   });
 
   bool get isEditing => reminder != null;
@@ -59,7 +62,7 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
   ReminderNotificationMode _notificationMode =
       ReminderNotificationMode.alarmAndNotification;
   bool _vibrate = true;
-  int _snoozeDurationMinutes = 10;
+  late int _snoozeDurationMinutes;
   List<ReminderSoundOption> _availableAlarmSounds = const [];
   bool _isSaving = false;
   bool _defaultsReady = false;
@@ -91,7 +94,7 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
         reminder?.notificationMode ??
         ReminderNotificationMode.alarmAndNotification;
     _vibrate = reminder?.vibrate ?? true;
-    _snoozeDurationMinutes = reminder?.snoozeDurationMinutes ?? 10;
+    _snoozeDurationMinutes = reminder?.snoozeDurationMinutes ?? 15;
     _loadAvailableAlarmSounds();
     if (reminder != null) {
       _defaultsReady = true;
@@ -106,7 +109,6 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
       return;
     }
 
-    _titleController.text = 'Untitled Reminder';
     final initialDateTime = DateTime.now().add(const Duration(minutes: 5));
     final today = DateUtils.dateOnly(DateTime.now());
     final requestedDate = widget.initialDate;
@@ -131,8 +133,8 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
         _notificationMode = defaults.notificationMode;
         _soundUri = defaults.soundUri;
         _soundName = defaults.soundName;
-        _snoozeDurationMinutes = defaults.snoozeDurationMinutes;
         _vibrate = defaults.vibrate;
+        _snoozeDurationMinutes = defaults.snoozeDurationMinutes;
         _defaultsReady = true;
       });
     } on Exception {
@@ -367,13 +369,12 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
     _recurrenceRule = RecurrenceRule(
       type: type,
       interval: _repeatInterval,
-      weekdays: type == RecurrenceType.weekly
-          ? weekdays
-          : const [],
+      weekdays: type == RecurrenceType.weekly ? weekdays : const [],
       dayOfWeek: type == RecurrenceType.weekly && weekdays.length == 1
           ? weekdays.single
           : null,
-      dayOfMonth: type == RecurrenceType.monthly || type == RecurrenceType.yearly
+      dayOfMonth:
+          type == RecurrenceType.monthly || type == RecurrenceType.yearly
           ? date.day
           : null,
       monthOfYear: type == RecurrenceType.yearly ? date.month : null,
@@ -470,7 +471,23 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
         _soundUri = selection.uri;
         _soundName = selection.name;
       });
+      try {
+        await NotificationService.instance.previewAlarmSound(selection.uri);
+      } on MissingPluginException {
+        _showSoundPreviewError();
+      } on PlatformException {
+        _showSoundPreviewError();
+      }
     }
+  }
+
+  void _showSoundPreviewError() {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Unable to preview this sound.')),
+    );
   }
 
   Future<void> _selectNotificationMode() async {
@@ -517,9 +534,8 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
   }
 
   Future<void> _selectSnoozeDuration() async {
-    const durations = [5, 10, 15, 30, 60];
     final selection = await _showOptionOverlay(
-      () => showModalBottomSheet<Object>(
+      () => showModalBottomSheet<int>(
         context: context,
         useSafeArea: true,
         showDragHandle: true,
@@ -530,11 +546,11 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
               child: Text(
-                'Snooze',
+                'Snooze duration',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
             ),
-            for (final minutes in durations)
+            for (final minutes in [5, 10, 15])
               ListTile(
                 title: Text('$minutes minutes'),
                 trailing: _snoozeDurationMinutes == minutes
@@ -544,74 +560,134 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
               ),
             ListTile(
               title: const Text('Custom'),
-              trailing: !durations.contains(_snoozeDurationMinutes)
+              trailing: _isCustomSnoozeDuration
                   ? const Icon(Icons.check)
                   : null,
-              onTap: () => Navigator.of(context).pop('custom'),
+              onTap: () => Navigator.of(context).pop(-1),
             ),
-            const SizedBox(height: 12),
           ],
         ),
       ),
     );
-    if (selection == 'custom' && mounted) {
-      final minutes = await _showCustomSnoozeDialog();
-      if (minutes != null && mounted) {
-        setState(() => _snoozeDurationMinutes = minutes);
+
+    if (selection == -1) {
+      final duration = await _selectCustomSnoozeDuration();
+      if (duration != null && mounted) {
+        setState(() => _snoozeDurationMinutes = duration);
       }
-    } else if (selection is int && mounted) {
+    } else if (selection != null && mounted) {
       setState(() => _snoozeDurationMinutes = selection);
     }
   }
 
-  Future<int?> _showCustomSnoozeDialog() async {
+  bool get _isCustomSnoozeDuration =>
+      _snoozeDurationMinutes != 5 &&
+      _snoozeDurationMinutes != 10 &&
+      _snoozeDurationMinutes != 15;
+
+  Future<int?> _selectCustomSnoozeDuration() async {
+    final isWholeHours =
+        _snoozeDurationMinutes >= 60 && _snoozeDurationMinutes % 60 == 0;
     final controller = TextEditingController(
-      text: _snoozeDurationMinutes > 60
-          ? _snoozeDurationMinutes.toString()
-          : '',
+      text: isWholeHours
+          ? (_snoozeDurationMinutes ~/ 60).toString()
+          : _snoozeDurationMinutes.toString(),
     );
-    final formKey = GlobalKey<FormState>();
-    final minutes = await showDialog<int>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Custom snooze'),
-        content: Form(
-          key: formKey,
-          child: TextFormField(
-            controller: controller,
-            autofocus: true,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Minutes',
-              helperText: 'Enter a value from 1 to 1440 minutes.',
+    var unit = isWholeHours ? 'hours' : 'minutes';
+    String? error;
+    try {
+      return await _showOptionOverlay(
+        () => showDialog<int>(
+          context: context,
+          builder: (context) => StatefulBuilder(
+            builder: (context, setDialogState) => AlertDialog(
+              title: const Text('Custom snooze duration'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          key: const ValueKey('snooze-custom-value'),
+                          controller: controller,
+                          autofocus: true,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          decoration: InputDecoration(
+                            labelText: 'Duration',
+                            errorText: error,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      DropdownButton<String>(
+                        key: const ValueKey('snooze-custom-unit'),
+                        value: unit,
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'minutes',
+                            child: Text('Minutes'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'hours',
+                            child: Text('Hours'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setDialogState(() {
+                              unit = value;
+                              error = null;
+                            });
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final value = int.tryParse(controller.text);
+                    final minutes = value == null
+                        ? null
+                        : value * (unit == 'hours' ? 60 : 1);
+                    if (minutes == null || minutes < 1 || minutes > 1440) {
+                      setDialogState(() {
+                        error = unit == 'hours'
+                            ? 'Enter 1 to 24 hours.'
+                            : 'Enter 1 to 1440 minutes.';
+                      });
+                      return;
+                    }
+                    Navigator.of(context).pop(minutes);
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
             ),
-            validator: (value) {
-              final minutes = int.tryParse(value?.trim() ?? '');
-              return minutes == null || minutes < 1 || minutes > 1440
-                  ? 'Enter a value from 1 to 1440.'
-                  : null;
-            },
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (!(formKey.currentState?.validate() ?? false)) {
-                return;
-              }
-              Navigator.of(context).pop(int.parse(controller.text.trim()));
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    return minutes;
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  String _snoozeDurationLabel(int minutes) {
+    if (minutes >= 60 && minutes % 60 == 0) {
+      final hours = minutes ~/ 60;
+      return '$hours ${hours == 1 ? 'hour' : 'hours'}';
+    }
+    return '$minutes ${minutes == 1 ? 'minute' : 'minutes'}';
   }
 
   Widget _fieldError(String? message) {
@@ -638,15 +714,28 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
     return Form(
       key: _formKey,
       child: Scaffold(
+        drawer: widget.navigationDrawer,
         appBar: AppBar(
           toolbarHeight: 56,
-          leading: IconButton(
-            tooltip: 'Back',
-            onPressed: () => Navigator.of(context).maybePop(),
-            icon: const Icon(Icons.arrow_back_rounded),
-          ),
+          leadingWidth: widget.navigationDrawer == null ? 52 : 104,
+          leading: widget.navigationDrawer == null
+              ? IconButton(
+                  tooltip: 'Back',
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  icon: const Icon(Icons.arrow_back_rounded),
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const AppNavigationMenuButton(),
+                    IconButton(
+                      tooltip: 'Back',
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      icon: const Icon(Icons.arrow_back_rounded),
+                    ),
+                  ],
+                ),
           title: const SizedBox.shrink(),
-          leadingWidth: 52,
           actions: [
             IconButton(
               key: const ValueKey('save-reminder'),
@@ -689,7 +778,7 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
                       letterSpacing: -0.4,
                     ),
                     decoration: InputDecoration(
-                      hintText: 'Untitled Reminder',
+                      hintText: 'Title',
                       hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
@@ -817,7 +906,7 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
                         key: const ValueKey('snooze-option'),
                         icon: Icons.snooze_outlined,
                         title: 'Snooze',
-                        value: _snoozeLabel(_snoozeDurationMinutes),
+                        value: _snoozeDurationLabel(_snoozeDurationMinutes),
                         onTap: _selectSnoozeDuration,
                       ),
                     ],
@@ -1289,10 +1378,6 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
     );
   }
 
-  String _snoozeLabel(int minutes) {
-    return minutes == 60 ? '1 hour' : '$minutes minutes';
-  }
-
   String _repeatSummary() {
     if (_repeatPreset != 'custom') {
       return _recurrenceLabel(_recurrenceRule, _selectedDate);
@@ -1305,7 +1390,8 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
       'years' => 'year',
       _ => 'week',
     };
-    var summary = 'Every $_repeatInterval $unit'
+    var summary =
+        'Every $_repeatInterval $unit'
         '${_repeatInterval == 1 ? '' : 's'}';
     if (_repeatUnit == 'weeks') {
       final weekdays = _repeatWeekdays.toList()..sort();

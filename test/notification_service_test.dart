@@ -9,42 +9,64 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  test('schedules a future one-time notification without an alarm', () async {
+  test(
+    'schedules alarm-mode reminders through the Android alarm runtime',
+    () async {
+      final notifications = _FakeNotificationPlatform();
+      final alarms = _FakeRecurrenceAlarmPlatform();
+      final alarmRuntime = _FakeAlarmRuntimePlatform();
+      final service = _service(
+        now: () => DateTime(2026, 9, 29, 8),
+        notifications: notifications,
+        alarms: alarms,
+        alarmRuntime: alarmRuntime,
+      );
+      await service.initialize();
+      final reminder = _reminder(
+        'one-time',
+        DateTime(2026, 9, 29, 9),
+        RecurrenceType.none,
+      );
+
+      await service.scheduleReminder(reminder);
+
+      expect(notifications.scheduled, isEmpty);
+      expect(alarmRuntime.scheduled.values.single.dateTime, reminder.dateTime);
+      expect(alarmRuntime.scheduled.values.single.reminder.id, reminder.id);
+      expect(alarmRuntime.scheduled.values.single.reminder.soundUri, isNull);
+      expect(alarmRuntime.scheduled.values.single.reminder.vibrate, isTrue);
+      expect(alarmRuntime.scheduled.values.single.isSnooze, isFalse);
+      expect(alarms.scheduled, isEmpty);
+    },
+  );
+
+  test('timer completion alert uses the notification platform', () async {
     final notifications = _FakeNotificationPlatform();
-    final alarms = _FakeRecurrenceAlarmPlatform();
     final service = _service(
       now: () => DateTime(2026, 9, 29, 8),
       notifications: notifications,
-      alarms: alarms,
-    );
-    await service.initialize();
-    final reminder = _reminder(
-      'one-time',
-      DateTime(2026, 9, 29, 9),
-      RecurrenceType.none,
+      alarms: _FakeRecurrenceAlarmPlatform(),
+      alarmRuntime: _FakeAlarmRuntimePlatform(),
     );
 
-    await service.scheduleReminder(reminder);
+    await service.showTimerFinished('5m');
 
-    expect(notifications.scheduled.values.single.dateTime, reminder.dateTime);
-    expect(notifications.scheduled.values.single.payload, reminder.id);
-    expect(notifications.scheduled.values.single.soundUri, isNull);
-    expect(
-      notifications.scheduled.values.single.notificationMode,
-      ReminderNotificationMode.alarmAndNotification,
-    );
-    expect(notifications.scheduled.values.single.vibrate, isTrue);
-    expect(alarms.scheduled, isEmpty);
+    final alert = notifications.timerAlerts.single;
+    expect(alert.title, 'Timer finished');
+    expect(alert.body, '5m');
+    expect(notifications.scheduled, isEmpty);
   });
 
   test(
     'notification-only reminders never use the selected alarm sound',
     () async {
       final notifications = _FakeNotificationPlatform();
+      final alarmRuntime = _FakeAlarmRuntimePlatform();
       final service = _service(
         now: () => DateTime(2026, 9, 29, 8),
         notifications: notifications,
         alarms: _FakeRecurrenceAlarmPlatform(),
+        alarmRuntime: alarmRuntime,
       );
       await service.initialize();
       final reminder =
@@ -67,6 +89,7 @@ void main() {
         ReminderNotificationMode.notificationOnly,
       );
       expect(scheduled.vibrate, isFalse);
+      expect(alarmRuntime.scheduled, isEmpty);
     },
   );
 
@@ -75,10 +98,12 @@ void main() {
     final snoozedUntil = now.add(const Duration(minutes: 15));
     final notifications = _FakeNotificationPlatform();
     final alarms = _FakeRecurrenceAlarmPlatform();
+    final alarmRuntime = _FakeAlarmRuntimePlatform();
     final service = _service(
       now: () => now,
       notifications: notifications,
       alarms: alarms,
+      alarmRuntime: alarmRuntime,
     );
     await service.initialize();
     final reminder = _reminder(
@@ -89,26 +114,58 @@ void main() {
 
     await service.scheduleReminder(reminder);
 
-    expect(notifications.scheduled.values.single.dateTime, snoozedUntil);
-    expect(
-      alarms.scheduled.values.single,
-      snoozedUntil.add(const Duration(seconds: 10)),
+    expect(alarmRuntime.scheduled.values.single.dateTime, snoozedUntil);
+    expect(alarmRuntime.scheduled.values.single.isSnooze, isTrue);
+    expect(notifications.scheduled, isEmpty);
+    expect(alarms.scheduled, isEmpty);
+  });
+
+  test('preserves a due native snooze during startup reconciliation', () async {
+    final now = DateTime(2026, 9, 29, 8);
+    final notifications = _FakeNotificationPlatform();
+    final runtime = _FakeAlarmRuntimePlatform();
+    final service = _service(
+      now: () => now,
+      notifications: notifications,
+      alarms: _FakeRecurrenceAlarmPlatform(),
+      alarmRuntime: runtime,
     );
+    await service.initialize();
+    final reminder = _reminder(
+      'due-snooze',
+      DateTime(2026, 9, 28, 9),
+      RecurrenceType.daily,
+    );
+
+    await service.scheduleReminder(reminder);
+    final id = runtime.scheduled.keys.single;
+    runtime.pendingSnoozes[id] = now.subtract(const Duration(minutes: 1));
+
+    await service.scheduleReminder(reminder);
+
+    expect(
+      runtime.scheduled[id]?.dateTime,
+      now.add(const Duration(seconds: 1)),
+    );
+    expect(runtime.scheduled[id]?.isSnooze, isTrue);
   });
 
   test(
     'requests platform permissions during foreground initialization',
     () async {
       final notifications = _FakeNotificationPlatform();
+      final alarmRuntime = _FakeAlarmRuntimePlatform();
       final service = _service(
         now: () => DateTime(2026, 9, 29, 8),
         notifications: notifications,
         alarms: _FakeRecurrenceAlarmPlatform(),
+        alarmRuntime: alarmRuntime,
       );
 
       await service.initialize();
 
       expect(notifications.permissionRequests, [true]);
+      expect(alarmRuntime.permissionRequests, [true]);
     },
   );
 
@@ -116,10 +173,12 @@ void main() {
     'distinct reminder IDs with the same hash get distinct schedules',
     () async {
       final notifications = _FakeNotificationPlatform();
+      final alarmRuntime = _FakeAlarmRuntimePlatform();
       final service = _service(
         now: () => DateTime(2026, 9, 29, 8),
         notifications: notifications,
         alarms: _FakeRecurrenceAlarmPlatform(),
+        alarmRuntime: alarmRuntime,
       );
       await service.initialize();
       final first = _reminder(
@@ -136,17 +195,16 @@ void main() {
       await service.scheduleReminder(first);
       await service.scheduleReminder(second);
 
-      expect(notifications.scheduled, hasLength(2));
+      expect(notifications.scheduled, isEmpty);
+      expect(alarmRuntime.scheduled, hasLength(2));
       expect(
-        notifications.scheduled.values.map(
-          (notification) => notification.payload,
-        ),
+        alarmRuntime.scheduled.values.map((scheduled) => scheduled.reminder.id),
         containsAll([first.id, second.id]),
       );
 
       await service.cancelReminder(second.id);
-      expect(notifications.scheduled, hasLength(1));
-      expect(notifications.scheduled.values.single.payload, first.id);
+      expect(alarmRuntime.scheduled, hasLength(1));
+      expect(alarmRuntime.scheduled.values.single.reminder.id, first.id);
     },
   );
 
@@ -221,7 +279,7 @@ void main() {
           DateTime(2026, 1, 31, 9, 30),
           RecurrenceType.monthly,
           dayOfMonth: 31,
-        );
+        ).copyWith(notificationMode: ReminderNotificationMode.notificationOnly);
 
         await service.scheduleReminder(reminder);
         expect(
@@ -278,10 +336,12 @@ void main() {
 
       final notifications = _FakeNotificationPlatform();
       final alarms = _FakeRecurrenceAlarmPlatform();
+      final alarmRuntime = _FakeAlarmRuntimePlatform();
       final service = _service(
         now: () => DateTime(2026, 9, 29, 10),
         notifications: notifications,
         alarms: alarms,
+        alarmRuntime: alarmRuntime,
       );
       await service.initialize();
       final restoredStorage = ReminderStorage(notificationScheduler: service);
@@ -290,10 +350,11 @@ void main() {
       await restoredStorage.rescheduleAllReminders();
       await restoredStorage.rescheduleAllReminders();
 
-      expect(notifications.scheduled, hasLength(1));
-      expect(alarms.scheduled, hasLength(1));
+      expect(notifications.scheduled, isEmpty);
+      expect(alarms.scheduled, isEmpty);
+      expect(alarmRuntime.scheduled, hasLength(1));
       expect(
-        notifications.scheduled.values.single.dateTime,
+        alarmRuntime.scheduled.values.single.dateTime,
         DateTime(2026, 10, 3, 9, 30),
       );
     },
@@ -305,10 +366,12 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       final notifications = _FakeNotificationPlatform();
       final alarms = _FakeRecurrenceAlarmPlatform();
+      final alarmRuntime = _FakeAlarmRuntimePlatform();
       final service = _service(
         now: () => DateTime(2026, 9, 29, 8),
         notifications: notifications,
         alarms: alarms,
+        alarmRuntime: alarmRuntime,
       );
       await service.initialize();
       final storage = ReminderStorage(notificationScheduler: service);
@@ -327,8 +390,11 @@ void main() {
           title: 'Edited reminder',
         ),
       );
-      expect(notifications.scheduled, hasLength(1));
-      expect(notifications.scheduled.values.single.title, 'Edited reminder');
+      expect(alarmRuntime.scheduled, hasLength(1));
+      expect(
+        alarmRuntime.scheduled.values.single.reminder.title,
+        'Edited reminder',
+      );
 
       await storage.updateReminder(
         _reminder(
@@ -338,16 +404,17 @@ void main() {
           enabled: false,
         ),
       );
-      expect(notifications.scheduled, isEmpty);
+      expect(alarmRuntime.scheduled, isEmpty);
       expect(alarms.scheduled, isEmpty);
       expect(await storage.getReminders(), hasLength(1));
 
       await storage.updateReminder(reminder);
-      expect(notifications.scheduled, hasLength(1));
-      expect(alarms.scheduled, hasLength(1));
+      expect(alarmRuntime.scheduled, hasLength(1));
+      expect(alarms.scheduled, isEmpty);
 
       await storage.deleteReminder('lifecycle');
       expect(notifications.scheduled, isEmpty);
+      expect(alarmRuntime.scheduled, isEmpty);
       expect(alarms.scheduled, isEmpty);
       expect(await storage.getReminders(), isEmpty);
     },
@@ -368,7 +435,11 @@ Future<void> _expectNextOccurrence({
   );
   await service.initialize();
 
-  await service.scheduleReminder(reminder);
+  await service.scheduleReminder(
+    reminder.copyWith(
+      notificationMode: ReminderNotificationMode.notificationOnly,
+    ),
+  );
 
   expect(notifications.scheduled.values.single.dateTime, expected);
   expect(
@@ -381,10 +452,12 @@ NotificationService _service({
   required DateTime Function() now,
   required _FakeNotificationPlatform notifications,
   required _FakeRecurrenceAlarmPlatform alarms,
+  _FakeAlarmRuntimePlatform? alarmRuntime,
 }) {
   return NotificationService.forTesting(
     notificationPlatform: notifications,
     recurrenceAlarmPlatform: alarms,
+    alarmRuntimePlatform: alarmRuntime,
     isAndroid: true,
     now: now,
     localTimezone: () async => 'Etc/UTC',
@@ -416,6 +489,7 @@ Reminder _reminder(
 
 class _FakeNotificationPlatform implements NotificationPlatform {
   final scheduled = <int, _ScheduledNotification>{};
+  final timerAlerts = <_TimerAlert>[];
   final permissionRequests = <bool>[];
 
   @override
@@ -450,6 +524,23 @@ class _FakeNotificationPlatform implements NotificationPlatform {
   Future<void> cancel(int id) async {
     scheduled.remove(id);
   }
+
+  @override
+  Future<void> showTimerFinished({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    timerAlerts.add(_TimerAlert(id: id, title: title, body: body));
+  }
+}
+
+class _TimerAlert {
+  const _TimerAlert({required this.id, required this.title, required this.body});
+
+  final int id;
+  final String title;
+  final String body;
 }
 
 class _FakeRecurrenceAlarmPlatform implements RecurrenceAlarmPlatform {
@@ -472,6 +563,74 @@ class _FakeRecurrenceAlarmPlatform implements RecurrenceAlarmPlatform {
   Future<void> cancel(int id) async {
     scheduled.remove(id);
   }
+}
+
+class _FakeAlarmRuntimePlatform implements AlarmRuntimePlatform {
+  final scheduled = <int, _ScheduledAlarm>{};
+  final permissionRequests = <bool>[];
+  final stopped = <int>[];
+  final snoozed = <int>[];
+  final pendingSnoozes = <int, DateTime>{};
+
+  @override
+  Stream<String> get ringingReminderIds => const Stream<String>.empty();
+
+  @override
+  Stream<String> get stoppedReminderIds => const Stream<String>.empty();
+
+  @override
+  Future<bool> initialize({required bool requestPermissions}) async {
+    permissionRequests.add(requestPermissions);
+    return true;
+  }
+
+  @override
+  Future<void> schedule({
+    required int id,
+    required DateTime dateTime,
+    required Reminder reminder,
+    required bool isSnooze,
+  }) async {
+    scheduled[id] = _ScheduledAlarm(
+      dateTime: dateTime,
+      reminder: reminder,
+      isSnooze: isSnooze,
+    );
+  }
+
+  @override
+  Future<DateTime?> pendingSnoozeTime(int id) async => pendingSnoozes[id];
+
+  @override
+  Future<void> cancel(int id) async {
+    scheduled.remove(id);
+    pendingSnoozes.remove(id);
+  }
+
+  @override
+  Future<void> stop(int id) async {
+    stopped.add(id);
+  }
+
+  @override
+  Future<void> snooze(int id) async {
+    snoozed.add(id);
+  }
+
+  @override
+  Future<String?> activeReminderId() async => null;
+}
+
+class _ScheduledAlarm {
+  const _ScheduledAlarm({
+    required this.dateTime,
+    required this.reminder,
+    required this.isSnooze,
+  });
+
+  final DateTime dateTime;
+  final Reminder reminder;
+  final bool isSnooze;
 }
 
 class _ScheduledNotification {

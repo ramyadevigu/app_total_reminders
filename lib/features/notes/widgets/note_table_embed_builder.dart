@@ -108,25 +108,21 @@ class _EditableNoteTableState extends State<_EditableNoteTable> {
       children: [
         IconButton(
           tooltip: 'Add row',
-          visualDensity: VisualDensity.compact,
           onPressed: _addRow,
           icon: const Icon(Icons.add_box_outlined),
         ),
         IconButton(
           tooltip: 'Add column',
-          visualDensity: VisualDensity.compact,
           onPressed: _addColumn,
           icon: const Icon(Icons.view_column_outlined),
         ),
         IconButton(
           tooltip: 'Remove row',
-          visualDensity: VisualDensity.compact,
           onPressed: _rows.length > 1 ? _removeRow : null,
           icon: const Icon(Icons.remove_circle_outline),
         ),
         IconButton(
           tooltip: 'Remove column',
-          visualDensity: VisualDensity.compact,
           onPressed: _rows.first.length > 1 ? _removeColumn : null,
           icon: const Icon(Icons.view_column_outlined),
         ),

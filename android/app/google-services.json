@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1042133254155",
+    "project_id": "total-reminders",
+    "storage_bucket": "total-reminders.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1042133254155:android:1d71f1f70d75b25b25070e",
+        "android_client_info": {
+          "package_name": "com.ramyadevi.total_reminders"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDtB8tiuXetqAENwyUslVncmozVzyDjfHs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -2,9 +2,65 @@ import 'dart:convert';
 
 enum NotebookIconType { work, goals, journal, health, ideas, general }
 
+const int defaultNotebookColorValue = 0xFF8FB2ED;
+
+enum NotebookIcon {
+  folder,
+  book,
+  notebook,
+  autoStories,
+  work,
+  flag,
+  heart,
+  lightbulb,
+  school,
+  science,
+  palette,
+  travel,
+  home,
+  savings,
+  fitness,
+  music,
+  nature,
+  coffee,
+  target,
+  shopping,
+}
+
+enum NotebookBaseColor {
+  blue(defaultNotebookColorValue, 'Blue'),
+  pink(0xFFE9ABB7, 'Pink'),
+  green(0xFF9ACD9D, 'Green'),
+  yellow(0xFFE5CB76, 'Yellow'),
+  purple(0xFFB5A0DE, 'Purple'),
+  orange(0xFFE6AD78, 'Orange'),
+  teal(0xFF78C4BB, 'Teal'),
+  red(0xFFE3918D, 'Red');
+
+  const NotebookBaseColor(this.value, this.label);
+
+  final int value;
+  final String label;
+}
+
 enum NoteAttachmentType { image, file }
 
-enum NoteCardColor { standard, blue, cyan, mint, lightGreen, peach, pink, lavender }
+enum NoteCardColor {
+  standard,
+  yellow,
+  pink,
+  purple,
+  blue,
+  green,
+  cyan,
+  orange,
+  lavender,
+  teal,
+  sky,
+  mint,
+}
+
+enum NoteTextColor { defaultText, charcoal, blue, green, red, purple }
 
 enum NoteProjectPriority { low, medium, high }
 
@@ -151,16 +207,20 @@ class Notebook {
     required this.id,
     required this.name,
     required this.iconType,
-    required this.sections,
     required this.notes,
     required this.createdAt,
     required this.updatedAt,
+    this.description = '',
+    this.icon,
+    this.colorValue = defaultNotebookColorValue,
   });
 
   final String id;
   final String name;
+  final String description;
   final NotebookIconType iconType;
-  final List<NoteSection> sections;
+  final NotebookIcon? icon;
+  final int colorValue;
   final List<NoteEntry> notes;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -170,8 +230,10 @@ class Notebook {
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
+    'description': description,
     'iconType': iconType.name,
-    'sections': sections.map((section) => section.toJson()).toList(),
+    'icon': icon?.name,
+    'colorValue': colorValue,
     'notes': notes.map((note) => note.toJson()).toList(),
     'createdAt': createdAt.toIso8601String(),
     'updatedAt': updatedAt.toIso8601String(),
@@ -182,11 +244,15 @@ class Notebook {
     return Notebook(
       id: json['id'] is String ? json['id']! as String : '',
       name: json['name'] is String ? json['name']! as String : 'Notebook',
+      description: json['description'] is String
+          ? json['description']! as String
+          : '',
       iconType: NotebookIconType.values.firstWhere(
         (value) => value.name == json['iconType'],
         orElse: () => NotebookIconType.general,
       ),
-      sections: _readObjects(json['sections'], NoteSection.fromJson),
+      icon: _readNotebookIcon(json['icon']),
+      colorValue: _readNotebookColorValue(json['colorValue']),
       notes: _readObjects(json['notes'], NoteEntry.fromJson),
       createdAt: createdAt,
       updatedAt: _readDate(json['updatedAt']) ?? createdAt,
@@ -194,17 +260,22 @@ class Notebook {
   }
 
   Notebook copyWith({
+    String? id,
     String? name,
+    String? description,
     NotebookIconType? iconType,
-    List<NoteSection>? sections,
+    NotebookIcon? icon,
+    int? colorValue,
     List<NoteEntry>? notes,
     DateTime? updatedAt,
   }) {
     return Notebook(
-      id: id,
+      id: id ?? this.id,
       name: name ?? this.name,
+      description: description ?? this.description,
       iconType: iconType ?? this.iconType,
-      sections: sections ?? this.sections,
+      icon: icon ?? this.icon,
+      colorValue: colorValue ?? this.colorValue,
       notes: notes ?? this.notes,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -212,41 +283,10 @@ class Notebook {
   }
 }
 
-class NoteSection {
-  const NoteSection({
-    required this.id,
-    required this.name,
-    required this.createdAt,
-  });
-
-  final String id;
-  final String name;
-  final DateTime createdAt;
-
-  Map<String, Object?> toJson() => {
-    'id': id,
-    'name': name,
-    'createdAt': createdAt.toIso8601String(),
-  };
-
-  factory NoteSection.fromJson(Map<String, Object?> json) {
-    return NoteSection(
-      id: json['id'] is String ? json['id']! as String : '',
-      name: json['name'] is String ? json['name']! as String : 'General',
-      createdAt: _readDate(json['createdAt']) ?? DateTime.now(),
-    );
-  }
-
-  NoteSection copyWith({String? name}) {
-    return NoteSection(id: id, name: name ?? this.name, createdAt: createdAt);
-  }
-}
-
 class NoteEntry {
   const NoteEntry({
     required this.id,
     required this.notebookId,
-    required this.sectionId,
     required this.title,
     required this.content,
     this.richContentDelta,
@@ -256,12 +296,13 @@ class NoteEntry {
     required this.updatedAt,
     this.reminderId,
     this.isPinned = false,
-    this.color = NoteCardColor.standard,
+    this.isArchived = false,
+    this.color = NoteCardColor.yellow,
+    this.textColor = NoteTextColor.defaultText,
   });
 
   final String id;
   final String notebookId;
-  final String sectionId;
   final String title;
   final String content;
   final String? richContentDelta;
@@ -271,12 +312,13 @@ class NoteEntry {
   final DateTime updatedAt;
   final String? reminderId;
   final bool isPinned;
+  final bool isArchived;
   final NoteCardColor color;
+  final NoteTextColor textColor;
 
   Map<String, Object?> toJson() => {
     'id': id,
     'notebookId': notebookId,
-    'sectionId': sectionId,
     'title': title,
     'content': content,
     'richContentDelta': richContentDelta,
@@ -288,7 +330,9 @@ class NoteEntry {
     'updatedAt': updatedAt.toIso8601String(),
     'reminderId': reminderId,
     'isPinned': isPinned,
+    'isArchived': isArchived,
     'color': color.name,
+    'textColor': textColor.name,
   };
 
   factory NoteEntry.fromJson(Map<String, Object?> json) {
@@ -297,9 +341,6 @@ class NoteEntry {
       id: json['id'] is String ? json['id']! as String : '',
       notebookId: json['notebookId'] is String
           ? json['notebookId']! as String
-          : '',
-      sectionId: json['sectionId'] is String
-          ? json['sectionId']! as String
           : '',
       title: json['title'] is String ? json['title']! as String : '',
       content: json['content'] is String ? json['content']! as String : '',
@@ -314,7 +355,11 @@ class NoteEntry {
           ? json['reminderId']! as String
           : null,
       isPinned: json['isPinned'] is bool ? json['isPinned']! as bool : false,
+      isArchived: json['isArchived'] is bool
+          ? json['isArchived']! as bool
+          : false,
       color: _readNoteCardColor(json['color']),
+      textColor: _readNoteTextColor(json['textColor']),
     );
   }
 
@@ -359,7 +404,7 @@ class NoteEntry {
   }
 
   NoteEntry copyWith({
-    String? sectionId,
+    String? notebookId,
     String? title,
     String? content,
     String? richContentDelta,
@@ -370,12 +415,13 @@ class NoteEntry {
     String? reminderId,
     bool clearReminderId = false,
     bool? isPinned,
+    bool? isArchived,
     NoteCardColor? color,
+    NoteTextColor? textColor,
   }) {
     return NoteEntry(
       id: id,
-      notebookId: notebookId,
-      sectionId: sectionId ?? this.sectionId,
+      notebookId: notebookId ?? this.notebookId,
       title: title ?? this.title,
       content: content ?? this.content,
       richContentDelta: richContentDelta ?? this.richContentDelta,
@@ -387,9 +433,21 @@ class NoteEntry {
       updatedAt: updatedAt ?? this.updatedAt,
       reminderId: clearReminderId ? null : reminderId ?? this.reminderId,
       isPinned: isPinned ?? this.isPinned,
+      isArchived: isArchived ?? this.isArchived,
       color: color ?? this.color,
+      textColor: textColor ?? this.textColor,
     );
   }
+}
+
+NoteTextColor _readNoteTextColor(Object? value) {
+  if (value is! String) {
+    return NoteTextColor.defaultText;
+  }
+  return NoteTextColor.values.firstWhere(
+    (color) => color.name == value,
+    orElse: () => NoteTextColor.defaultText,
+  );
 }
 
 NoteProjectMetadata? _readProjectMetadata(Object? value) {
@@ -424,14 +482,21 @@ NoteProjectStatus _readProjectStatus(Object? value) {
 }
 
 NoteCardColor _readNoteCardColor(Object? value) {
-  if (value is String) {
-    for (final color in NoteCardColor.values) {
-      if (color.name == value) {
-        return color;
-      }
-    }
+  return noteCardColorFromName(value);
+}
+
+NoteCardColor noteCardColorFromName(Object? value) {
+  if (value is! String) {
+    return NoteCardColor.standard;
   }
-  return NoteCardColor.standard;
+  return switch (value) {
+    'lightGreen' => NoteCardColor.green,
+    'peach' => NoteCardColor.orange,
+    _ => NoteCardColor.values.firstWhere(
+      (color) => color.name == value,
+      orElse: () => NoteCardColor.standard,
+    ),
+  };
 }
 
 class RecentNoteView {
@@ -440,14 +505,81 @@ class RecentNoteView {
     required this.notebookId,
     required this.notebookIconType,
     required this.notebookName,
-    required this.sectionName,
+    this.notebookIcon,
+    this.notebookColorValue = defaultNotebookColorValue,
+    this.tagColors = const {},
   });
 
   final NoteEntry note;
   final String notebookId;
   final NotebookIconType notebookIconType;
   final String notebookName;
-  final String sectionName;
+  final NotebookIcon? notebookIcon;
+  final int notebookColorValue;
+  final Map<String, NoteCardColor> tagColors;
+}
+
+const String defaultNotebookId = 'quick-notes';
+const String defaultNotebookName = 'Quick Notes';
+
+bool isDefaultNotebook(Notebook notebook) {
+  return notebook.id == defaultNotebookId;
+}
+
+List<Notebook> ensureQuickNotesNotebook(Iterable<Notebook> notebooks) {
+  final result = List<Notebook>.of(notebooks);
+  var defaultIndex = result.indexWhere(isDefaultNotebook);
+  if (defaultIndex == -1) {
+    defaultIndex = result.indexWhere(
+      (notebook) =>
+          notebook.name.trim().toLowerCase() ==
+          defaultNotebookName.toLowerCase(),
+    );
+  }
+  if (defaultIndex == -1) {
+    final now = DateTime.now();
+    result.insert(
+      0,
+      Notebook(
+        id: defaultNotebookId,
+        name: defaultNotebookName,
+        iconType: NotebookIconType.general,
+        icon: NotebookIcon.notebook,
+        notes: const [],
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+  } else {
+    final notebook = result[defaultIndex];
+    result[defaultIndex] = notebook.copyWith(
+      id: defaultNotebookId,
+      name: defaultNotebookName,
+      notes: notebook.notes
+          .map((note) => note.copyWith(notebookId: defaultNotebookId))
+          .toList(),
+    );
+  }
+  return result;
+}
+
+NotebookIcon? _readNotebookIcon(Object? value) {
+  if (value is! String) {
+    return null;
+  }
+  for (final icon in NotebookIcon.values) {
+    if (icon.name == value) {
+      return icon;
+    }
+  }
+  return null;
+}
+
+int _readNotebookColorValue(Object? value) {
+  if (value is! int || value < 0 || value > 0xFFFFFFFF) {
+    return defaultNotebookColorValue;
+  }
+  return value | 0xFF000000;
 }
 
 List<T> _readObjects<T>(Object? value, T Function(Map<String, Object?>) parse) {

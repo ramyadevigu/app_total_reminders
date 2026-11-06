@@ -8,6 +8,28 @@ class CalendarOccurrence {
   final DateTime dateTime;
 }
 
+bool shouldDisplayOnCalendar(Reminder reminder) {
+  final recurrence = reminder.recurrenceRule;
+  switch (recurrence.type) {
+    case RecurrenceType.none:
+      return true;
+    case RecurrenceType.monthly:
+      return recurrence.interval >= 1;
+    case RecurrenceType.weekly:
+      if (recurrence.interval < 1) {
+        return false;
+      }
+      final weekdays = recurrence.weekdays.isNotEmpty
+          ? recurrence.weekdays
+          : [recurrence.dayOfWeek ?? reminder.dateTime.weekday];
+      return weekdays.every((weekday) => weekday >= 1 && weekday <= 7) &&
+          weekdays.isNotEmpty;
+    case RecurrenceType.daily:
+    case RecurrenceType.yearly:
+      return recurrence.interval >= 1;
+  }
+}
+
 class CalendarService {
   CalendarService({RecurrenceService? recurrenceService})
     : _recurrenceService = recurrenceService ?? RecurrenceService();
@@ -27,7 +49,9 @@ class CalendarService {
 
     final occurrences = <DateTime, List<CalendarOccurrence>>{};
     for (final reminder in reminders) {
-      if (!reminder.enabled || reminder.isCompleted) {
+      if (!reminder.enabled ||
+          reminder.isCompleted ||
+          !shouldDisplayOnCalendar(reminder)) {
         continue;
       }
 

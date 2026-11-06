@@ -59,7 +59,7 @@ void main() {
     );
     expect(reminder.soundName, 'Default');
     expect(reminder.vibrate, isTrue);
-    expect(reminder.snoozeDurationMinutes, 10);
+    expect(reminder.snoozeDurationMinutes, 15);
     expect(reminder.snoozedUntil, isNull);
     expect(reminder.createdAt, DateTime(1970));
   });

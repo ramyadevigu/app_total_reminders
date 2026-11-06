@@ -38,11 +38,14 @@ class ThemePreferenceStore {
       final normalized = storedColor.startsWith('#')
           ? storedColor.substring(1)
           : storedColor;
-      if (normalized.length != 6) {
+      if (normalized.length != 6 && normalized.length != 8) {
         return defaultAccentColor;
       }
       final value = int.tryParse(normalized, radix: 16);
-      return value == null ? defaultAccentColor : Color(0xFF000000 | value);
+      if (value == null) {
+        return defaultAccentColor;
+      }
+      return normalized.length == 8 ? Color(value) : Color(0xFF000000 | value);
     } on Exception {
       return defaultAccentColor;
     }
@@ -58,11 +61,13 @@ class ThemePreferenceStore {
 
   Future<void> saveAccentColor(Color color) async {
     final preferences = await SharedPreferences.getInstance();
-    final rgb = (color.toARGB32() & 0x00FFFFFF)
+    final argb = color.toARGB32();
+    final alpha = (argb >> 24) & 0xFF;
+    final hex = (alpha == 255 ? argb & 0x00FFFFFF : argb)
         .toRadixString(16)
-        .padLeft(6, '0')
+        .padLeft(alpha == 255 ? 6 : 8, '0')
         .toUpperCase();
-    final saved = await preferences.setString(_colorThemeKey, '#$rgb');
+    final saved = await preferences.setString(_colorThemeKey, '#$hex');
     if (!saved) {
       throw StateError('Unable to save the accent color preference.');
     }

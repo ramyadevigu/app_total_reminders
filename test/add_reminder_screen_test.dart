@@ -121,13 +121,21 @@ void main() {
   ) async {
     SharedPreferences.setMockInitialValues({});
     const soundChannel = MethodChannel('smarana/reminder_sounds');
+    final previewedSoundUris = <String?>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(
-          soundChannel,
-          (call) async => [
-            {'name': 'Morning Bell', 'uri': 'content://alarms/morning-bell'},
-          ],
-        );
+        .setMockMethodCallHandler(soundChannel, (call) async {
+          if (call.method == 'listAlarmSounds') {
+            return [
+              {'name': 'Morning Bell', 'uri': 'content://alarms/morning-bell'},
+            ];
+          }
+          if (call.method == 'previewAlarmSound') {
+            previewedSoundUris.add(
+              (call.arguments as Map<Object?, Object?>)['uri'] as String?,
+            );
+          }
+          return null;
+        });
     final storage = ReminderStorage(
       notificationScheduler: FakeReminderNotificationScheduler(),
     );
@@ -139,8 +147,12 @@ void main() {
           .widget<TextField>(find.byKey(const ValueKey('title-field')))
           .controller!
           .text,
-      'Untitled Reminder',
+      '',
     );
+    final titleField = tester.widget<TextField>(
+      find.byKey(const ValueKey('title-field')),
+    );
+    expect(titleField.decoration?.hintText, 'Title');
     expect(find.byKey(const ValueKey('description-field')), findsNothing);
 
     await tester.enterText(
@@ -165,6 +177,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Morning Bell').last);
     await tester.pumpAndSettle();
+    expect(previewedSoundUris, ['content://alarms/morning-bell']);
 
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pumpAndSettle();
@@ -207,10 +220,16 @@ void main() {
 
     final snoozeOption = find.byKey(const ValueKey('snooze-option'));
     await tester.ensureVisible(snoozeOption);
+    expect(find.text('15 minutes'), findsAtLeastNWidgets(1));
     await tester.tap(snoozeOption);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('15 minutes'));
+    for (final option in ['5 minutes', '10 minutes', 'Custom']) {
+      expect(find.text(option), findsOneWidget);
+    }
+    expect(find.text('15 minutes'), findsAtLeastNWidgets(1));
+    await tester.tap(find.text('10 minutes'));
     await tester.pumpAndSettle();
+    expect(find.text('10 minutes'), findsOneWidget);
 
     final vibrateSwitch = find.descendant(
       of: find.byKey(const ValueKey('vibrate-option')),
@@ -239,7 +258,7 @@ void main() {
     expect(saved.soundUri, 'content://alarms/morning-bell');
     expect(saved.notificationMode, ReminderNotificationMode.notificationOnly);
     expect(saved.vibrate, isFalse);
-    expect(saved.snoozeDurationMinutes, 15);
+    expect(saved.snoozeDurationMinutes, 10);
 
     final recurring = saved.copyWith(
       recurrenceRule: const RecurrenceRule(
@@ -266,7 +285,74 @@ void main() {
     expect(updated.soundName, 'Morning Bell');
     expect(updated.soundUri, 'content://alarms/morning-bell');
     expect(updated.vibrate, isFalse);
-    expect(updated.snoozeDurationMinutes, 15);
+    expect(updated.snoozeDurationMinutes, 10);
+  });
+
+  testWidgets('saves custom snooze durations in hours and minutes', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final storage = ReminderStorage(
+      notificationScheduler: FakeReminderNotificationScheduler(),
+    );
+
+    await _openForm(tester, storage: storage);
+    await tester.enterText(
+      find.byKey(const ValueKey('title-field')),
+      'Custom snooze reminder',
+    );
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const ValueKey('alert-section')));
+    await tester.tap(find.byKey(const ValueKey('alert-section')));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.byKey(const ValueKey('snooze-option')));
+    await tester.tap(find.byKey(const ValueKey('snooze-option')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Custom'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('snooze-custom-value')),
+      '2',
+    );
+    await tester.tap(find.byKey(const ValueKey('snooze-custom-unit')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Hours').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+    expect(find.text('2 hours'), findsOneWidget);
+
+    await _saveForm(tester);
+    var saved = (await storage.getReminders()).single;
+    expect(saved.snoozeDurationMinutes, 120);
+
+    await _openForm(tester, storage: storage, reminder: saved);
+    await tester.ensureVisible(find.byKey(const ValueKey('alert-section')));
+    await tester.tap(find.byKey(const ValueKey('alert-section')));
+    await tester.pumpAndSettle();
+    expect(find.text('2 hours'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey('snooze-option')));
+    await tester.tap(find.byKey(const ValueKey('snooze-option')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Custom'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('snooze-custom-value')),
+      '45',
+    );
+    await tester.tap(find.byKey(const ValueKey('snooze-custom-unit')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Minutes').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+    expect(find.text('45 minutes'), findsOneWidget);
+
+    await _saveForm(tester);
+    saved = (await storage.getReminders()).single;
+    expect(saved.snoozeDurationMinutes, 45);
   });
 
   testWidgets('offers only the repeat presets and custom weekdays', (
@@ -350,9 +436,7 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
     expect(
-      find.textContaining(
-        'Every 2 weeks on Monday, Wednesday and Friday',
-      ),
+      find.textContaining('Every 2 weeks on Monday, Wednesday and Friday'),
       findsAtLeastNWidgets(1),
     );
     expect(find.textContaining('until'), findsAtLeastNWidgets(1));
@@ -378,6 +462,10 @@ void main() {
       tester,
       storage: storage,
       initialDate: DateTime(2030, 1, 15),
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('title-field')),
+      'Monthly reminder',
     );
     await tester.tap(find.byKey(const ValueKey('repeat-field')));
     await tester.pumpAndSettle();

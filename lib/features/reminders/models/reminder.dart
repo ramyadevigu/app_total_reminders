@@ -114,7 +114,7 @@ class Reminder {
     this.soundName = 'Default',
     this.notificationMode = ReminderNotificationMode.alarmAndNotification,
     this.vibrate = true,
-    this.snoozeDurationMinutes = 10,
+    this.snoozeDurationMinutes = 15,
     this.snoozedUntil,
     required this.createdAt,
   });
@@ -140,13 +140,13 @@ class Reminder {
       recurrenceRule: recurrenceRule ?? this.recurrenceRule,
       enabled: enabled ?? this.enabled,
       isCompleted: isCompleted ?? this.isCompleted,
-        soundUri: soundUri ?? this.soundUri,
-        soundName: soundName ?? this.soundName,
-        notificationMode: notificationMode ?? this.notificationMode,
-        vibrate: vibrate ?? this.vibrate,
-        snoozeDurationMinutes:
+      soundUri: soundUri ?? this.soundUri,
+      soundName: soundName ?? this.soundName,
+      notificationMode: notificationMode ?? this.notificationMode,
+      vibrate: vibrate ?? this.vibrate,
+      snoozeDurationMinutes:
           snoozeDurationMinutes ?? this.snoozeDurationMinutes,
-        snoozedUntil: clearSnoozedUntil
+      snoozedUntil: clearSnoozedUntil
           ? null
           : snoozedUntil ?? this.snoozedUntil,
       createdAt: createdAt,
@@ -191,16 +191,20 @@ class Reminder {
       isCompleted: json['isCompleted'] is bool
           ? json['isCompleted'] as bool
           : false,
-        soundUri: json['soundUri'] is String ? json['soundUri'] as String : null,
-        soundName: json['soundName'] is String
+      soundUri: json['soundUri'] is String ? json['soundUri'] as String : null,
+      soundName: json['soundName'] is String
           ? json['soundName'] as String
           : 'Default',
-        notificationMode: _notificationModeFromJson(json['notificationMode']),
-        vibrate: json['vibrate'] is bool ? json['vibrate'] as bool : true,
-        snoozeDurationMinutes:
-          _readInteger(json['snoozeDurationMinutes'], minimum: 1, maximum: 1440) ??
-          10,
-        snoozedUntil: _dateTimeFromJson(json['snoozedUntil']),
+      notificationMode: _notificationModeFromJson(json['notificationMode']),
+      vibrate: json['vibrate'] is bool ? json['vibrate'] as bool : true,
+      snoozeDurationMinutes:
+          _readInteger(
+            json['snoozeDurationMinutes'],
+            minimum: 1,
+            maximum: 1440,
+          ) ??
+          15,
+      snoozedUntil: _dateTimeFromJson(json['snoozedUntil']),
       createdAt: _dateTimeFromJson(json['createdAt']) ?? dateTime,
     );
   }

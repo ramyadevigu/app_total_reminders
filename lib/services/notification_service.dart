@@ -56,6 +56,12 @@ abstract interface class NotificationPlatform {
   });
 
   Future<void> cancel(int id);
+
+  Future<void> showTimerFinished({
+    required int id,
+    required String title,
+    required String body,
+  });
 }
 
 abstract interface class RecurrenceAlarmPlatform {
@@ -71,10 +77,36 @@ abstract interface class RecurrenceAlarmPlatform {
   Future<void> cancel(int id);
 }
 
+abstract interface class AlarmRuntimePlatform {
+  Future<bool> initialize({required bool requestPermissions});
+
+  Future<void> schedule({
+    required int id,
+    required DateTime dateTime,
+    required Reminder reminder,
+    required bool isSnooze,
+  });
+
+  Future<DateTime?> pendingSnoozeTime(int id);
+
+  Future<void> cancel(int id);
+
+  Future<void> stop(int id);
+
+  Future<void> snooze(int id);
+
+  Future<String?> activeReminderId();
+
+  Stream<String> get ringingReminderIds;
+
+  Stream<String> get stoppedReminderIds;
+}
+
 class NotificationService implements ReminderNotificationScheduler {
   NotificationService._(
     this._notificationPlatform,
     this._recurrenceAlarmPlatform,
+    this._alarmRuntimePlatform,
     this._isAndroid,
     this._now,
     this._localTimezone,
@@ -84,12 +116,14 @@ class NotificationService implements ReminderNotificationScheduler {
   NotificationService.forTesting({
     required NotificationPlatform notificationPlatform,
     required RecurrenceAlarmPlatform recurrenceAlarmPlatform,
+    AlarmRuntimePlatform? alarmRuntimePlatform,
     required bool isAndroid,
     required DateTime Function() now,
     Future<String> Function()? localTimezone,
   }) : this._(
          notificationPlatform,
          recurrenceAlarmPlatform,
+         alarmRuntimePlatform ?? _NoopAlarmRuntimePlatform(),
          isAndroid,
          now,
          localTimezone ?? _readLocalTimezone,
@@ -98,6 +132,7 @@ class NotificationService implements ReminderNotificationScheduler {
   static final NotificationService instance = NotificationService._(
     _FlutterLocalNotificationPlatform(),
     _AndroidRecurrenceAlarmPlatform(),
+    _MethodChannelAlarmRuntimePlatform(),
     !kIsWeb && defaultTargetPlatform == TargetPlatform.android,
     DateTime.now,
     _readLocalTimezone,
@@ -111,12 +146,53 @@ class NotificationService implements ReminderNotificationScheduler {
 
   final NotificationPlatform _notificationPlatform;
   final RecurrenceAlarmPlatform _recurrenceAlarmPlatform;
+  final AlarmRuntimePlatform _alarmRuntimePlatform;
   final bool _isAndroid;
   final DateTime Function() _now;
   final Future<String> Function() _localTimezone;
+  Future<void>? _initialization;
   bool _exactAlarmAllowed = true;
+  bool _alarmRuntimeAvailable = false;
 
   Stream<String> get openedReminderIds => _openedReminderIds.stream;
+
+  Stream<String> get ringingReminderIds =>
+      _alarmRuntimePlatform.ringingReminderIds;
+
+  Stream<String> get stoppedReminderIds =>
+      _alarmRuntimePlatform.stoppedReminderIds;
+
+  Future<String?> activeAlarmReminderId() {
+    if (!_alarmRuntimeAvailable) {
+      return Future<String?>.value();
+    }
+    return _alarmRuntimePlatform.activeReminderId();
+  }
+
+  Future<void> stopAlarm(String reminderId) async {
+    final id =
+        await _storedNotificationIdFor(reminderId) ??
+        _notificationIdHash(reminderId);
+    await _alarmRuntimePlatform.stop(id);
+  }
+
+  Future<void> snoozeAlarm(String reminderId) async {
+    final id =
+        await _storedNotificationIdFor(reminderId) ??
+        _notificationIdHash(reminderId);
+    await _alarmRuntimePlatform.snooze(id);
+  }
+
+  static const _timerNotificationId = 0x7a11;
+
+  Future<void> showTimerFinished(String timerLabel) async {
+    await initialize();
+    await _notificationPlatform.showTimerFinished(
+      id: _timerNotificationId,
+      title: 'Timer finished',
+      body: timerLabel,
+    );
+  }
 
   String? takeInitialReminderId() {
     final reminderId = _initialReminderId;
@@ -125,10 +201,32 @@ class NotificationService implements ReminderNotificationScheduler {
   }
 
   Future<void> initialize() async {
+    final currentInitialization = _initialization;
+    if (currentInitialization != null) {
+      return currentInitialization;
+    }
+
+    final initialization = _initialize();
+    _initialization = initialization;
+    try {
+      await initialization;
+    } on Object {
+      if (identical(_initialization, initialization)) {
+        _initialization = null;
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _initialize() async {
     await _initializeTimezone();
     _exactAlarmAllowed = await _notificationPlatform.initialize(
       requestPermissions: true,
     );
+    if (_isAndroid) {
+      await _alarmRuntimePlatform.initialize(requestPermissions: true);
+      _alarmRuntimeAvailable = true;
+    }
     final preferences = await SharedPreferences.getInstance();
     await preferences.setBool(_exactAlarmAllowedKey, _exactAlarmAllowed);
     if (_isAndroid) {
@@ -139,6 +237,7 @@ class NotificationService implements ReminderNotificationScheduler {
   Future<void> initializeInBackground({required bool exactAlarmAllowed}) async {
     await _initializeTimezone();
     _exactAlarmAllowed = exactAlarmAllowed;
+    _alarmRuntimeAvailable = false;
     await _notificationPlatform.initialize(requestPermissions: false);
     if (_isAndroid) {
       await _recurrenceAlarmPlatform.initialize();
@@ -169,12 +268,23 @@ class NotificationService implements ReminderNotificationScheduler {
     }
   }
 
+  Future<void> previewAlarmSound(String? soundUri) async {
+    await _soundCatalogChannel.invokeMethod<void>('previewAlarmSound', {
+      'uri': soundUri,
+    });
+  }
+
   /// Keeps one notification and one one-shot Android callback per recurring
   /// reminder. The callback runs after delivery, asks the recurrence engine for
   /// the next valid occurrence, and replaces both schedules. Startup
   /// reconciliation rebuilds these schedules from persisted reminders.
   @override
   Future<void> scheduleReminder(Reminder reminder) async {
+    final initialization = _initialization;
+    if (initialization != null) {
+      await initialization;
+    }
+
     final id = await _notificationIdFor(reminder.id);
     if (_isAndroid) {
       await _recurrenceAlarmPlatform.cancel(id);
@@ -182,39 +292,69 @@ class NotificationService implements ReminderNotificationScheduler {
 
     if (!reminder.enabled || reminder.isCompleted) {
       await _notificationPlatform.cancel(id);
+      if (_alarmRuntimeAvailable) {
+        await _alarmRuntimePlatform.cancel(id);
+      }
       return;
     }
 
     final now = _now();
     final snoozedUntil = reminder.snoozedUntil;
+    final usesNativeAlarm =
+        _alarmRuntimeAvailable &&
+        reminder.notificationMode ==
+            ReminderNotificationMode.alarmAndNotification;
+    final pendingSnooze = usesNativeAlarm
+        ? await _alarmRuntimePlatform.pendingSnoozeTime(id)
+        : null;
     final occurrence = snoozedUntil != null && snoozedUntil.isAfter(now)
         ? snoozedUntil
+        : pendingSnooze != null
+        ? pendingSnooze.isAfter(now)
+              ? pendingSnooze
+              : now.add(const Duration(seconds: 1))
         : reminder.recurrenceRule.type == RecurrenceType.none
         ? (reminder.dateTime.isAfter(now) ? reminder.dateTime : null)
         : recurrence_utils.nextOccurrence(reminder, after: now);
     if (occurrence == null || !occurrence.isAfter(now)) {
       await _notificationPlatform.cancel(id);
+      if (_alarmRuntimeAvailable && !usesNativeAlarm) {
+        await _alarmRuntimePlatform.cancel(id);
+      }
       return;
     }
 
     final description = reminder.description?.trim();
-    await _notificationPlatform.schedule(
-      id: id,
-      dateTime: occurrence,
-      title: reminder.title,
-      body: description == null || description.isEmpty ? null : description,
-      payload: reminder.id,
-      exactAlarmAllowed: _exactAlarmAllowed,
-      soundUri:
-          reminder.notificationMode ==
-              ReminderNotificationMode.alarmAndNotification
-          ? reminder.soundUri
-          : null,
-      notificationMode: reminder.notificationMode,
-      vibrate: reminder.vibrate,
-    );
+    if (usesNativeAlarm) {
+      await _notificationPlatform.cancel(id);
+      await _alarmRuntimePlatform.schedule(
+        id: id,
+        dateTime: occurrence,
+        reminder: reminder,
+        isSnooze:
+            (snoozedUntil != null && snoozedUntil.isAfter(now)) ||
+            pendingSnooze != null,
+      );
+    } else {
+      if (_alarmRuntimeAvailable) {
+        await _alarmRuntimePlatform.cancel(id);
+      }
+      await _notificationPlatform.schedule(
+        id: id,
+        dateTime: occurrence,
+        title: reminder.title,
+        body: description == null || description.isEmpty ? null : description,
+        payload: reminder.id,
+        exactAlarmAllowed: _exactAlarmAllowed,
+        soundUri: null,
+        notificationMode: reminder.notificationMode,
+        vibrate: reminder.vibrate,
+      );
+    }
 
-    if (_isAndroid && reminder.recurrenceRule.type != RecurrenceType.none) {
+    if (_isAndroid &&
+        !usesNativeAlarm &&
+        reminder.recurrenceRule.type != RecurrenceType.none) {
       await _recurrenceAlarmPlatform.schedule(
         dateTime: occurrence.add(_rearmDelay),
         id: id,
@@ -226,12 +366,20 @@ class NotificationService implements ReminderNotificationScheduler {
 
   @override
   Future<void> cancelReminder(String reminderId) async {
+    final initialization = _initialization;
+    if (initialization != null) {
+      await initialization;
+    }
+
     final id =
         await _storedNotificationIdFor(reminderId) ??
         _notificationIdHash(reminderId);
     await _notificationPlatform.cancel(id);
     if (_isAndroid) {
       await _recurrenceAlarmPlatform.cancel(id);
+    }
+    if (_alarmRuntimeAvailable) {
+      await _alarmRuntimePlatform.cancel(id);
     }
     await _releaseNotificationId(reminderId);
   }
@@ -364,6 +512,124 @@ Future<String> _readLocalTimezone() async {
   }
 
   return identifier;
+}
+
+class _MethodChannelAlarmRuntimePlatform implements AlarmRuntimePlatform {
+  static const _channel = MethodChannel('smarana/alarm_runtime');
+
+  final StreamController<String> _ringingReminderIds =
+      StreamController<String>.broadcast();
+  final StreamController<String> _stoppedReminderIds =
+      StreamController<String>.broadcast();
+
+  @override
+  Stream<String> get ringingReminderIds => _ringingReminderIds.stream;
+
+  @override
+  Stream<String> get stoppedReminderIds => _stoppedReminderIds.stream;
+
+  @override
+  Future<bool> initialize({required bool requestPermissions}) async {
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'alarmRinging' && call.arguments is String) {
+        final decoded = jsonDecode(call.arguments as String);
+        if (decoded is Map && decoded['reminderId'] is String) {
+          _ringingReminderIds.add(decoded['reminderId'] as String);
+        }
+      } else if (call.method == 'alarmStopped' && call.arguments is String) {
+        final decoded = jsonDecode(call.arguments as String);
+        if (decoded is Map && decoded['reminderId'] is String) {
+          _stoppedReminderIds.add(decoded['reminderId'] as String);
+        }
+      }
+    });
+    if (!requestPermissions) {
+      return true;
+    }
+
+    return await _channel.invokeMethod<bool>(
+          'ensureFullScreenIntentPermission',
+        ) ??
+        false;
+  }
+
+  @override
+  Future<void> schedule({
+    required int id,
+    required DateTime dateTime,
+    required Reminder reminder,
+    required bool isSnooze,
+  }) async {
+    await _channel.invokeMethod<void>('scheduleAlarm', {
+      'id': id,
+      'triggerAtMillis': dateTime.millisecondsSinceEpoch,
+      'reminderJson': jsonEncode(reminder.toJson()),
+      'isSnooze': isSnooze,
+    });
+  }
+
+  @override
+  Future<DateTime?> pendingSnoozeTime(int id) async {
+    final millis = await _channel.invokeMethod<int>('pendingSnoozeTime', {
+      'id': id,
+    });
+    return millis == null ? null : DateTime.fromMillisecondsSinceEpoch(millis);
+  }
+
+  @override
+  Future<void> cancel(int id) async {
+    await _channel.invokeMethod<void>('cancelAlarm', {'id': id});
+  }
+
+  @override
+  Future<void> stop(int id) async {
+    await _channel.invokeMethod<void>('stopAlarm', {'id': id});
+  }
+
+  @override
+  Future<void> snooze(int id) async {
+    await _channel.invokeMethod<void>('snoozeAlarm', {'id': id});
+  }
+
+  @override
+  Future<String?> activeReminderId() =>
+      _channel.invokeMethod<String>('activeAlarmReminderId');
+}
+
+class _NoopAlarmRuntimePlatform implements AlarmRuntimePlatform {
+  @override
+  Stream<String> get ringingReminderIds => const Stream<String>.empty();
+
+  @override
+  Stream<String> get stoppedReminderIds => const Stream<String>.empty();
+
+  @override
+  Future<bool> initialize({required bool requestPermissions}) async => true;
+
+  @override
+  Future<void> schedule({
+    required int id,
+    required DateTime dateTime,
+    required Reminder reminder,
+    required bool isSnooze,
+  }) async {}
+
+  @override
+  Future<DateTime?> pendingSnoozeTime(int id) async => null;
+
+  @override
+  Future<void> cancel(int id) async {}
+
+  @override
+  Future<void> stop(int id) =>
+      Future<void>.error(UnsupportedError('Native alarms are unavailable.'));
+
+  @override
+  Future<void> snooze(int id) =>
+      Future<void>.error(UnsupportedError('Native alarms are unavailable.'));
+
+  @override
+  Future<String?> activeReminderId() async => null;
 }
 
 class _FlutterLocalNotificationPlatform implements NotificationPlatform {
@@ -524,6 +790,32 @@ class _FlutterLocalNotificationPlatform implements NotificationPlatform {
   @override
   Future<void> cancel(int id) async {
     await _plugin.cancel(id: id);
+  }
+
+  @override
+  Future<void> showTimerFinished({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    await _plugin.show(
+      id: id,
+      title: title,
+      body: body,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'reminders',
+          'Reminders',
+          channelDescription: 'Scheduled reminder notifications',
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
+          category: AndroidNotificationCategory.reminder,
+        ),
+        windows: WindowsNotificationDetails(),
+      ),
+    );
   }
 }
 

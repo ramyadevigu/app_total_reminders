@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "1042133254155",
+    "project_id": "total-reminders",
+    "storage_bucket": "total-reminders.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1042133254155:android:1d71f1f70d75b25b25070e",
+        "android_client_info": {
+          "package_name": "com.ramyadevi.total_reminders"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1042133254155-0o0uu9dklf1usvovionhad7tu29o5ne4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ramyadevi.total_reminders",
+            "certificate_hash": "54978338978f215b3ea561be39fe9ef1695c47b3"
+          }
+        },
+        {
+          "client_id": "1042133254155-afodso03s8ev2ms2r114p7ktpk62pvmc.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDtB8tiuXetqAENwyUslVncmozVzyDjfHs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1042133254155-afodso03s8ev2ms2r114p7ktpk62pvmc.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

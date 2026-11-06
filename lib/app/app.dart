@@ -2,10 +2,19 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../features/auth/widgets/authentication_gate.dart';
 import '../features/calender/models/calendar_view_mode.dart';
 import '../features/calender/calender_screen.dart';
 import '../features/notes/notes_screen.dart';
+import '../features/my_day/my_day_screen.dart';
+import '../features/notes/models/note_workspace_models.dart';
+import '../features/auth/services/google_auth_service.dart';
+import '../features/auth/screens/login_screen.dart';
+import '../features/auth/screens/profile_screen.dart';
+import '../features/notes/services/note_workspace_storage.dart';
 import '../features/reminders/screens/add_reminder_screen.dart';
+import '../features/reminders/screens/alarm_ringing_screen.dart';
+import '../features/reminders/models/reminder.dart';
 import '../features/reminders/services/reminder_storage.dart';
 import '../features/reminders/reminders_screen.dart';
 import '../features/settings/services/reminder_preferences_store.dart';
@@ -13,10 +22,14 @@ import '../features/settings/settings_screen.dart';
 import '../features/time_tools/stopwatch_screen.dart';
 import '../features/time_tools/timer_screen.dart';
 import '../services/notification_service.dart';
+import '../theme/app_backdrop.dart';
+import '../theme/app_design_tokens.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_preference_store.dart';
+import '../widgets/app_navigation_drawer.dart';
+import '../widgets/fade_indexed_stack.dart';
 
-enum _AppMenuAction { settings, help, feedback }
+enum _AppMenuAction { settings, help }
 
 class AppSmarana extends StatefulWidget {
   const AppSmarana({
@@ -24,11 +37,21 @@ class AppSmarana extends StatefulWidget {
     this.initialThemeMode = ThemeMode.system,
     this.initialAccentColor = defaultAccentColor,
     this.themePreferenceStore = const ThemePreferenceStore(),
+    this.initializeServicesAfterFirstFrame,
+    this.ringingAlarmIds,
+    this.stoppedAlarmIds,
+    this.readActiveAlarmReminderId,
+    this.loadAlarmReminders,
   });
 
   final ThemeMode initialThemeMode;
   final Color initialAccentColor;
   final ThemePreferenceStore themePreferenceStore;
+  final Future<void> Function()? initializeServicesAfterFirstFrame;
+  final Stream<String>? ringingAlarmIds;
+  final Stream<String>? stoppedAlarmIds;
+  final Future<String?> Function()? readActiveAlarmReminderId;
+  final Future<List<Reminder>> Function()? loadAlarmReminders;
 
   @override
   State<AppSmarana> createState() => _AppSmaranaState();
@@ -39,7 +62,13 @@ class _AppSmaranaState extends State<AppSmarana> {
   late ThemeMode _themeMode;
   late Color _accentColor;
   StreamSubscription<String>? _notificationSubscription;
+  StreamSubscription<String>? _alarmSubscription;
+  StreamSubscription<String>? _alarmStoppedSubscription;
   bool _openingNotificationReminder = false;
+  bool _openingRingingAlarm = false;
+  String? _ringingAlarmId;
+  String? _pendingRingingAlarmId;
+  Route<void>? _ringingAlarmRoute;
 
   @override
   void initState() {
@@ -50,10 +79,21 @@ class _AppSmaranaState extends State<AppSmarana> {
     _notificationSubscription = notifications.openedReminderIds.listen(
       _openReminderFromNotification,
     );
-    final launchReminderId = notifications.takeInitialReminderId();
-    if (launchReminderId != null) {
+    _alarmSubscription =
+        (widget.ringingAlarmIds ?? notifications.ringingReminderIds).listen(
+          _openRingingAlarm,
+        );
+    _alarmStoppedSubscription =
+        (widget.stoppedAlarmIds ?? notifications.stoppedReminderIds).listen(
+          _closeRingingAlarm,
+        );
+    final initializeServicesAfterFirstFrame =
+        widget.initializeServicesAfterFirstFrame;
+    if (initializeServicesAfterFirstFrame != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _openReminderFromNotification(launchReminderId);
+        unawaited(
+          _initializeAfterFirstFrame(initializeServicesAfterFirstFrame),
+        );
       });
     }
   }
@@ -64,7 +104,187 @@ class _AppSmaranaState extends State<AppSmarana> {
     if (subscription != null) {
       unawaited(subscription.cancel());
     }
+    final alarmSubscription = _alarmSubscription;
+    if (alarmSubscription != null) {
+      unawaited(alarmSubscription.cancel());
+    }
+    final alarmStoppedSubscription = _alarmStoppedSubscription;
+    if (alarmStoppedSubscription != null) {
+      unawaited(alarmStoppedSubscription.cancel());
+    }
     super.dispose();
+  }
+
+  Future<void> _initializeAfterFirstFrame(
+    Future<void> Function() initializeServices,
+  ) async {
+    try {
+      await initializeServices();
+    } on Object catch (error, stackTrace) {
+      _reportStartupError(error, stackTrace);
+      return;
+    }
+
+    final launchReminderId = NotificationService.instance
+        .takeInitialReminderId();
+    try {
+      await ReminderStorage().rescheduleAllReminders();
+    } on Object catch (error, stackTrace) {
+      _reportStartupError(error, stackTrace);
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    unawaited(_restoreRingingAlarmWithErrorReporting());
+    if (launchReminderId != null) {
+      unawaited(_openReminderFromNotification(launchReminderId));
+    }
+  }
+
+  Future<void> _restoreRingingAlarmWithErrorReporting() async {
+    try {
+      await _restoreRingingAlarm();
+    } on Object catch (error, stackTrace) {
+      _reportStartupError(error, stackTrace);
+    }
+  }
+
+  void _reportStartupError(Object error, StackTrace stackTrace) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'app startup',
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    final context = _navigatorKey.currentContext;
+    if (context != null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Some reminders could not be restored or scheduled.',
+          ),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: _retryAfterStartupError,
+          ),
+        ),
+      );
+    }
+  }
+
+  void _retryAfterStartupError() {
+    final initializeServices = widget.initializeServicesAfterFirstFrame;
+    if (initializeServices != null) {
+      unawaited(_initializeAfterFirstFrame(initializeServices));
+    }
+  }
+
+  Future<void> _restoreRingingAlarm() async {
+    final reminderId = await _readActiveAlarmReminderId();
+    if (reminderId != null) {
+      await _openRingingAlarm(reminderId);
+    }
+  }
+
+  Future<String?> _readActiveAlarmReminderId() {
+    final read = widget.readActiveAlarmReminderId;
+    return read == null
+        ? NotificationService.instance.activeAlarmReminderId()
+        : read();
+  }
+
+  Future<List<Reminder>> _loadAlarmReminders() {
+    final load = widget.loadAlarmReminders;
+    return load == null ? ReminderStorage().getReminders() : load();
+  }
+
+  Future<void> _openRingingAlarm(String reminderId) async {
+    if (!mounted) {
+      return;
+    }
+    if (_openingRingingAlarm) {
+      if (_ringingAlarmId != reminderId) {
+        _pendingRingingAlarmId = reminderId;
+        _dismissRingingAlarmRoute();
+      }
+      return;
+    }
+
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _openRingingAlarm(reminderId);
+      });
+      return;
+    }
+
+    _openingRingingAlarm = true;
+    Route<void>? ringingRoute;
+    try {
+      final activeReminderId = await _readActiveAlarmReminderId();
+      if (activeReminderId != reminderId || !mounted) {
+        return;
+      }
+      final reminders = await _loadAlarmReminders();
+      Reminder? ringingReminder;
+      for (final reminder in reminders) {
+        if (reminder.id == reminderId) {
+          ringingReminder = reminder;
+          break;
+        }
+      }
+      if (ringingReminder != null && mounted) {
+        _ringingAlarmId = reminderId;
+        ringingRoute = MaterialPageRoute<void>(
+          builder: (_) => AlarmRingingScreen(reminder: ringingReminder!),
+          fullscreenDialog: true,
+        );
+        _ringingAlarmRoute = ringingRoute;
+        await navigator.push<void>(ringingRoute);
+      }
+    } on Exception catch (error, stackTrace) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'alarm ringing screen',
+        ),
+      );
+    } finally {
+      _ringingAlarmId = null;
+      if (identical(_ringingAlarmRoute, ringingRoute)) {
+        _ringingAlarmRoute = null;
+      }
+      _openingRingingAlarm = false;
+      final pendingReminderId = _pendingRingingAlarmId;
+      _pendingRingingAlarmId = null;
+      if (pendingReminderId != null && mounted) {
+        unawaited(_openRingingAlarm(pendingReminderId));
+      }
+    }
+  }
+
+  void _closeRingingAlarm(String reminderId) {
+    if (!mounted || _ringingAlarmId != reminderId) {
+      return;
+    }
+
+    _dismissRingingAlarmRoute();
+  }
+
+  void _dismissRingingAlarmRoute() {
+    final navigator = _navigatorKey.currentState;
+    final route = _ringingAlarmRoute;
+    if (navigator != null && route != null && route.isActive) {
+      _ringingAlarmRoute = null;
+      navigator.removeRoute(route);
+    }
   }
 
   Future<void> _openReminderFromNotification(String reminderId) async {
@@ -128,14 +348,20 @@ class _AppSmaranaState extends State<AppSmarana> {
       navigatorKey: _navigatorKey,
       title: 'Total Reminders',
       debugShowCheckedModeBanner: false,
+      builder: (context, child) =>
+          AppBackdrop(child: child ?? const SizedBox.shrink()),
       theme: buildLightTheme(_accentColor),
       darkTheme: buildDarkTheme(_accentColor),
       themeMode: _themeMode,
-      home: HomeScreen(
-        selectedThemeMode: _themeMode,
-        onThemeModeChanged: _changeThemeMode,
-        selectedAccentColor: _accentColor,
-        onAccentColorChanged: _changeAccentColor,
+      themeAnimationDuration: AppMotion.theme,
+      themeAnimationCurve: AppMotion.standard,
+      home: AuthenticationGate(
+        authenticatedChild: HomeScreen(
+          selectedThemeMode: _themeMode,
+          onThemeModeChanged: _changeThemeMode,
+          selectedAccentColor: _accentColor,
+          onAccentColorChanged: _changeAccentColor,
+        ),
       ),
     );
   }
@@ -161,10 +387,24 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  bool _showingMyDay = false;
+  final ValueNotifier<int> _noteWorkspaceRevision = ValueNotifier(0);
   final Set<int> _visitedTabs = {0};
+  final GlobalKey<ScaffoldState> _homeScaffoldKey = GlobalKey<ScaffoldState>();
+  final GlobalKey<NotesScreenState> _notesScreenKey =
+      GlobalKey<NotesScreenState>();
+  final NoteWorkspaceStorage _noteWorkspaceStorage = NoteWorkspaceStorage();
+  final Map<AppNavigationDestination, Widget> _navigationDrawers = {};
+  late final Widget _appMenu = _buildAppMenu();
   final ReminderPreferencesStore _preferencesStore =
       const ReminderPreferencesStore();
   CalendarViewMode _calendarViewMode = CalendarViewMode.month;
+
+  @override
+  void dispose() {
+    _noteWorkspaceRevision.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -188,68 +428,117 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: List<Widget>.generate(5, _buildTab),
+    final colorScheme = Theme.of(context).colorScheme;
+    final selectedDestination = _showingMyDay
+        ? AppNavigationDestination.myDay
+        : switch (_currentIndex) {
+            0 => AppNavigationDestination.calendar,
+            1 => AppNavigationDestination.notes,
+            2 => AppNavigationDestination.reminders,
+            3 => AppNavigationDestination.stopwatch,
+            _ => AppNavigationDestination.timer,
+          };
+    return AppNavigationDrawerHost(
+      onOpenDrawer: () => _homeScaffoldKey.currentState?.openDrawer(),
+      child: Scaffold(
+        key: _homeScaffoldKey,
+        drawer: _buildNavigationDrawer(selectedDestination),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1280),
+            child: FadeIndexedStack(
+              index: _showingMyDay ? 5 : _currentIndex,
+              children: List<Widget>.generate(6, _buildTab),
+            ),
+          ),
+        ),
+        bottomNavigationBar: NavigationBarTheme(
+          data: _showingMyDay
+              ? NavigationBarTheme.of(context).copyWith(
+                  labelTextStyle: WidgetStatePropertyAll(
+                    Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  iconTheme: WidgetStatePropertyAll(
+                    IconThemeData(color: colorScheme.onSurfaceVariant),
+                  ),
+                )
+              : NavigationBarTheme.of(context),
+          child: NavigationBar(
+            selectedIndex: _currentIndex,
+            indicatorColor: _showingMyDay
+                ? Colors.transparent
+                : colorScheme.primary.withValues(
+                    alpha: Theme.of(context).brightness == Brightness.light
+                        ? 0.12
+                        : 0.2,
+                  ),
+            onDestinationSelected: (index) {
+              setState(() {
+                _visitedTabs.add(index);
+                _currentIndex = index;
+                _showingMyDay = false;
+              });
+            },
+            destinations: [
+              _tabDestination(
+                context,
+                key: const ValueKey('nav-calendar'),
+                icon: Icons.calendar_month_outlined,
+                selectedIcon: Icons.calendar_month,
+                label: 'Calendar',
+              ),
+              _tabDestination(
+                context,
+                key: const ValueKey('nav-notes'),
+                icon: Icons.sticky_note_2_outlined,
+                selectedIcon: Icons.sticky_note_2,
+                label: 'Notes',
+              ),
+              _tabDestination(
+                context,
+                key: const ValueKey('nav-alarms'),
+                icon: Icons.notifications_none,
+                selectedIcon: Icons.notifications_active,
+                label: 'Alarms',
+              ),
+              _tabDestination(
+                context,
+                key: const ValueKey('nav-stopwatch'),
+                icon: Icons.av_timer_outlined,
+                selectedIcon: Icons.av_timer,
+                label: 'Stopwatch',
+              ),
+              _tabDestination(
+                context,
+                key: const ValueKey('nav-timer'),
+                icon: Icons.hourglass_bottom_outlined,
+                selectedIcon: Icons.hourglass_bottom,
+                label: 'Timer',
+              ),
+            ],
+          ),
+        ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        indicatorColor: Theme.of(context).colorScheme.primary,
-        onDestinationSelected: (index) {
-          setState(() {
-            _visitedTabs.add(index);
-            _currentIndex = index;
-          });
-        },
-        destinations: [
-          NavigationDestination(
-            key: ValueKey('nav-calendar'),
-            icon: Icon(Icons.calendar_month_outlined),
-            selectedIcon: Icon(
-              Icons.calendar_month,
-              color: Theme.of(context).colorScheme.onPrimary,
-            ),
-            label: 'Calendar',
-          ),
-          NavigationDestination(
-            key: ValueKey('nav-notes'),
-            icon: Icon(Icons.sticky_note_2_outlined),
-            selectedIcon: Icon(
-              Icons.sticky_note_2,
-              color: Theme.of(context).colorScheme.onPrimary,
-            ),
-            label: 'Notes',
-          ),
-          NavigationDestination(
-            key: ValueKey('nav-alarms'),
-            icon: Icon(Icons.notifications_none),
-            selectedIcon: Icon(
-              Icons.notifications_active,
-              color: Theme.of(context).colorScheme.onPrimary,
-            ),
-            label: 'Alarms',
-          ),
-          NavigationDestination(
-            key: ValueKey('nav-stopwatch'),
-            icon: Icon(Icons.av_timer_outlined),
-            selectedIcon: Icon(
-              Icons.av_timer,
-              color: Theme.of(context).colorScheme.onPrimary,
-            ),
-            label: 'Stopwatch',
-          ),
-          NavigationDestination(
-            key: ValueKey('nav-timer'),
-            icon: Icon(Icons.hourglass_bottom_outlined),
-            selectedIcon: Icon(
-              Icons.hourglass_bottom,
-              color: Theme.of(context).colorScheme.onPrimary,
-            ),
-            label: 'Timer',
-          ),
-        ],
-      ),
+    );
+  }
+
+  NavigationDestination _tabDestination(
+    BuildContext context, {
+    required Key key,
+    required IconData icon,
+    required IconData selectedIcon,
+    required String label,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return NavigationDestination(
+      key: key,
+      icon: Icon(icon),
+      selectedIcon: _showingMyDay
+          ? Icon(icon)
+          : Icon(selectedIcon, color: colorScheme.primary),
+      label: label,
     );
   }
 
@@ -258,21 +547,151 @@ class _HomeScreenState extends State<HomeScreen> {
       return const SizedBox.shrink();
     }
 
-    return switch (index) {
+    final tab = switch (index) {
       0 => CalendarScreen(
         viewMode: _calendarViewMode,
         onViewModeChanged: _changeCalendarViewMode,
-        appMenu: _buildAppMenu(),
+        appMenu: _appMenu,
+        navigationDrawer: _buildNavigationDrawer(
+          AppNavigationDestination.calendar,
+        ),
+        useInternalNavigationDrawer: false,
       ),
       1 => NotesScreen(
-        appMenu: _buildAppMenu(),
+        key: _notesScreenKey,
+        appMenu: _appMenu,
+        navigationDrawer: _buildNavigationDrawer(
+          AppNavigationDestination.notes,
+        ),
+        useInternalNavigationDrawer: false,
         onBackToSmarana: _returnToCalendar,
+        onWorkspaceChanged: _refreshNoteWorkspace,
+        onOpenSettings: () => _handleAppMenuAction(_AppMenuAction.settings),
+        onOpenHelp: () => _handleAppMenuAction(_AppMenuAction.help),
       ),
-      2 => RemindersScreen(title: 'Alarms', appMenu: _buildAppMenu()),
-      3 => StopwatchScreen(appMenu: _buildAppMenu()),
-      4 => TimerScreen(appMenu: _buildAppMenu()),
+      2 => RemindersScreen(
+        title: 'Alarms',
+        appMenu: _appMenu,
+        navigationDrawer: _buildNavigationDrawer(
+          AppNavigationDestination.reminders,
+        ),
+        useInternalNavigationDrawer: false,
+      ),
+      3 => StopwatchScreen(
+        appMenu: _appMenu,
+        navigationDrawer: _buildNavigationDrawer(
+          AppNavigationDestination.stopwatch,
+        ),
+        useInternalNavigationDrawer: false,
+      ),
+      4 => TimerScreen(
+        appMenu: _appMenu,
+        navigationDrawer: _buildNavigationDrawer(
+          AppNavigationDestination.timer,
+        ),
+        useInternalNavigationDrawer: false,
+        onTimerFinished: NotificationService.instance.showTimerFinished,
+      ),
+      5 => MyDayScreen(
+        appMenu: _appMenu,
+        navigationDrawer: _buildNavigationDrawer(
+          AppNavigationDestination.myDay,
+        ),
+        onNoteSelected: _openNoteFromDrawer,
+      ),
       _ => const SizedBox.shrink(),
     };
+    return TickerMode(
+      enabled: index == (_showingMyDay ? 5 : _currentIndex),
+      child: tab,
+    );
+  }
+
+  Widget _buildNavigationDrawer(AppNavigationDestination selected) {
+    return _navigationDrawers.putIfAbsent(
+      selected,
+      () => AppNavigationDrawer(
+        selectedDestination: selected,
+        workspaceStorage: _noteWorkspaceStorage,
+        workspaceChanges: _noteWorkspaceRevision,
+        onDestinationSelected: _selectNavigationDestination,
+        onNotebookSelected: _openNotebookFromDrawer,
+        onNoteSelected: _openNoteFromDrawer,
+      ),
+    );
+  }
+
+  void _selectNavigationDestination(AppNavigationDestination destination) {
+    switch (destination) {
+      case AppNavigationDestination.profile:
+        final user = GoogleAuthService.instance.currentUser;
+        if (user != null) {
+          Navigator.of(context).push<void>(
+            MaterialPageRoute<void>(
+              builder: (_) => ProfileScreen(
+                user: user,
+                navigationDrawer: _buildNavigationDrawer(
+                  AppNavigationDestination.profile,
+                ),
+              ),
+            ),
+          );
+        } else {
+          Navigator.of(context).push<void>(
+            MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
+          );
+        }
+        return;
+      case AppNavigationDestination.search:
+        _focusNotesSearch();
+        return;
+      case AppNavigationDestination.settings:
+        _handleAppMenuAction(_AppMenuAction.settings);
+        return;
+      case AppNavigationDestination.calendar:
+        _navigateToTab(0);
+        return;
+      case AppNavigationDestination.myDay:
+        _navigateToMyDay();
+        return;
+      case AppNavigationDestination.notes:
+        _navigateToTab(1);
+        return;
+      case AppNavigationDestination.reminders:
+        _navigateToTab(2);
+        return;
+      case AppNavigationDestination.stopwatch:
+        _navigateToTab(3);
+        return;
+      case AppNavigationDestination.timer:
+        _navigateToTab(4);
+        return;
+    }
+  }
+
+  void _openNotebookFromDrawer(String notebookId) {
+    _navigateToTab(1);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _notesScreenKey.currentState?.openNotebookById(notebookId);
+    });
+  }
+
+  void _openNoteFromDrawer(String notebookId, NoteEntry note) {
+    _navigateToTab(1);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _notesScreenKey.currentState?.openNoteById(notebookId, note.id);
+    });
+  }
+
+  void _refreshNoteWorkspace() {
+    _noteWorkspaceRevision.value++;
+  }
+
+  void _focusNotesSearch() {
+    _navigateToTab(1);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _notesScreenKey.currentState?.focusSearch();
+    });
   }
 
   Widget _buildAppMenu() {
@@ -298,14 +717,6 @@ class _HomeScreenState extends State<HomeScreen> {
             title: Text('Help'),
           ),
         ),
-        PopupMenuItem<_AppMenuAction>(
-          value: _AppMenuAction.feedback,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.feedback_outlined),
-            title: Text('Send Feedback'),
-          ),
-        ),
       ],
     );
   }
@@ -316,6 +727,9 @@ class _HomeScreenState extends State<HomeScreen> {
         await Navigator.of(context).push<void>(
           MaterialPageRoute<void>(
             builder: (_) => SettingsScreen(
+              navigationDrawer: _buildNavigationDrawer(
+                AppNavigationDestination.settings,
+              ),
               selectedThemeMode: widget.selectedThemeMode,
               selectedAccentColor: widget.selectedAccentColor,
               selectedCalendarViewMode: _calendarViewMode,
@@ -332,24 +746,12 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.help_outline),
             title: const Text('Help'),
             content: const Text(
-              'Use Calendar to view reminders, Notes to save ideas, and '
-              'Alarms to manage your reminders.',
+              'Calendar shows your reminders by day, week, or month.\n\n'
+              'Notes keeps your ideas, with Archive and Deleted filters.\n\n'
+              'Alarms manages your reminders and their alerts.\n\n'
+              'Stopwatch and Timer measure time, with laps and saved timers.\n\n'
+              'Settings controls theme, accent color, snooze, and notifications.',
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
-        );
-      case _AppMenuAction.feedback:
-        await showDialog<void>(
-          context: context,
-          builder: (context) => AlertDialog(
-            icon: const Icon(Icons.feedback_outlined),
-            title: const Text('Send Feedback'),
-            content: const Text('Feedback delivery is not configured yet.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
@@ -379,11 +781,39 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _returnToCalendar() {
-    if (_currentIndex == 0) {
+    if (_currentIndex == 0 && !_showingMyDay) {
       return;
     }
     setState(() {
       _currentIndex = 0;
+      _showingMyDay = false;
     });
+  }
+
+  void _navigateToTab(int index) {
+    if (index < 0 || index >= 5) {
+      return;
+    }
+    _popToHome();
+    setState(() {
+      _visitedTabs.add(index);
+      _currentIndex = index;
+      _showingMyDay = false;
+    });
+  }
+
+  void _navigateToMyDay() {
+    _popToHome();
+    setState(() {
+      _visitedTabs.add(5);
+      _showingMyDay = true;
+    });
+  }
+
+  void _popToHome() {
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.popUntil((route) => route.isFirst);
+    }
   }
 }

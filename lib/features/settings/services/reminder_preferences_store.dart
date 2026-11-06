@@ -8,7 +8,7 @@ class ReminderDefaults {
     this.notificationMode = ReminderNotificationMode.alarmAndNotification,
     this.soundUri,
     this.soundName = 'Default',
-    this.snoozeDurationMinutes = 10,
+    this.snoozeDurationMinutes = 15,
     this.vibrate = true,
     this.calendarViewMode = CalendarViewMode.month,
   });
@@ -58,8 +58,6 @@ class ReminderPreferencesStore {
       (mode) => mode.name == modeName,
       orElse: () => ReminderNotificationMode.alarmAndNotification,
     );
-    final snoozeDuration = preferences.getInt(_snoozeDurationKey);
-    const availableSnoozeDurations = [5, 10, 15, 20, 30];
     final viewModeName = preferences.getString(_calendarViewModeKey);
     final calendarViewMode = switch (viewModeName) {
       'nextThreeDays' || 'threeDay' => CalendarViewMode.threeDay,
@@ -74,12 +72,15 @@ class ReminderPreferencesStore {
       notificationMode: notificationMode,
       soundUri: preferences.getString(_soundUriKey),
       soundName: preferences.getString(_soundNameKey) ?? 'Default',
-      snoozeDurationMinutes: availableSnoozeDurations.contains(snoozeDuration)
-          ? snoozeDuration!
-          : 10,
+      snoozeDurationMinutes: _readSnoozeDuration(preferences),
       vibrate: preferences.getBool(_vibrateKey) ?? true,
       calendarViewMode: calendarViewMode,
     );
+  }
+
+  static int _readSnoozeDuration(SharedPreferences preferences) {
+    final minutes = preferences.getInt(_snoozeDurationKey);
+    return minutes != null && minutes > 0 ? minutes : 15;
   }
 
   Future<void> saveDefaults(ReminderDefaults defaults) async {

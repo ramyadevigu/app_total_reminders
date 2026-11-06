@@ -3,19 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('startup splash shows the supplied background and compact logo', (
+  testWidgets('startup uses a neutral loading indicator without splash art', (
     tester,
   ) async {
-    await tester.pumpWidget(const MaterialApp(home: StartupSplashScreen()));
+    await tester.pumpWidget(const MaterialApp(home: StartupLoadingScreen()));
 
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
-
-    final logo = tester.widget<Image>(
-      find.byKey(const ValueKey('startup-logo')),
-    );
-    expect(logo.width, 128);
-    expect(logo.height, 160);
-
-    expect(find.byKey(const ValueKey('startup-background')), findsOneWidget);
+    expect(find.byType(Image), findsNothing);
   });
 }

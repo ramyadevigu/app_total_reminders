@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../services/analytics_service.dart';
 import '../../../services/notification_service.dart';
 import '../models/reminder.dart';
 
@@ -52,6 +53,7 @@ class ReminderStorage {
 
       reminders.add(reminder);
       await _writeReminders(reminders);
+      unawaited(AnalyticsService.instance.logReminderCreated());
       await _scheduleIfNeeded(reminder);
     });
   }

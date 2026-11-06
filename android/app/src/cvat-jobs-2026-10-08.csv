@@ -1,0 +1,2 @@
+ID,Job URL,Task ID,Task Name,Task URL,Project ID,Project Name,Project URL,Assignee,Stage,State,Type,Start Frame,Stop Frame,Frame Count,Created Date,Updated Date
+4565662,"https://app.cvat.ai/tasks/2655507/jobs/4565662",2655507,"fashion-object-detection","https://app.cvat.ai/tasks/2655507",,"","","","annotation","in progress","annotation",0,4,5,"2026-10-08T17:12:10.167066Z","2026-10-08T17:23:19.660347Z"

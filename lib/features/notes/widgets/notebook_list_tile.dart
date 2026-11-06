@@ -1,110 +1,118 @@
 import 'package:flutter/material.dart';
 
 import '../models/note_workspace_models.dart';
+import '../theme/notebook_colors.dart';
 
 class NotebookListTile extends StatelessWidget {
   const NotebookListTile({
     super.key,
     required this.notebook,
     required this.onOpen,
-    required this.onRename,
-    required this.onDelete,
+    required this.onOptions,
+    required this.selected,
   });
 
   final Notebook notebook;
   final VoidCallback onOpen;
-  final VoidCallback onRename;
-  final VoidCallback onDelete;
-
-  IconData get _icon {
-    return switch (notebook.iconType) {
-      NotebookIconType.work => Icons.work_outline,
-      NotebookIconType.goals => Icons.flag_outlined,
-      NotebookIconType.journal => Icons.auto_stories_outlined,
-      NotebookIconType.health => Icons.favorite_border,
-      NotebookIconType.ideas => Icons.lightbulb_outline,
-      NotebookIconType.general => Icons.menu_book_outlined,
-    };
-  }
+  final VoidCallback onOptions;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final accentColor = notebookAccentColor(theme, notebook.colorValue);
+    final foregroundColor = notebookForegroundColor(theme, notebook.colorValue);
+    final borderRadius = BorderRadius.circular(14);
+    final description = notebook.description.trim();
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: onOpen,
-      child: Ink(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: colorScheme.outlineVariant),
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '${notebook.name}, ${notebook.noteCount} notes',
+      onLongPress: onOptions,
+      child: Material(
+        color: notebookSurfaceColor(theme, notebook.colorValue),
+        shape: RoundedRectangleBorder(
+          borderRadius: borderRadius,
+          side: BorderSide(
+            color: selected ? accentColor : colorScheme.outlineVariant,
+            width: selected ? 2 : 1,
+          ),
         ),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: colorScheme.primary.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(_icon, color: colorScheme.primary),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                notebook.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
+        child: InkWell(
+          borderRadius: borderRadius,
+          onTap: onOpen,
+          onLongPress: onOptions,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            child: Row(
+              children: [
+                Icon(
+                  notebookIconData(notebook.icon, notebook.iconType),
+                  size: 26,
+                  color: accentColor,
                 ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            PopupMenuButton<String>(
-              tooltip: 'Notebook actions for ${notebook.name}',
-              onSelected: (value) {
-                if (value == 'rename') {
-                  onRename();
-                }
-                if (value == 'delete') {
-                  onDelete();
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem<String>(
-                  value: 'rename',
-                  child: Row(
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.drive_file_rename_outline),
-                      SizedBox(width: 12),
-                      Text('Rename'),
+                      Text(
+                        notebook.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: accentColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        description.isEmpty
+                            ? '${notebook.noteCount} notes'
+                            : description,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: foregroundColor,
+                        ),
+                      ),
                     ],
                   ),
                 ),
-                PopupMenuItem<String>(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete_outline),
-                      SizedBox(width: 12),
-                      Text('Delete'),
-                    ],
-                  ),
+                const SizedBox(width: 2),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (selected)
+                      Icon(
+                        Icons.check_circle_rounded,
+                        size: 17,
+                        color: accentColor,
+                      )
+                    else
+                      const SizedBox(height: 17),
+                    SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: IconButton(
+                        tooltip: 'Notebook options for ${notebook.name}',
+                        padding: EdgeInsets.zero,
+                        onPressed: onOptions,
+                        icon: Icon(
+                          Icons.more_horiz_rounded,
+                          size: 19,
+                          color: foregroundColor,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-            Text(
-              '${notebook.noteCount} notes',
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

@@ -114,6 +114,10 @@ void main() {
     'displays reminders and refreshes after create, edit, and delete',
     (tester) async {
       SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       final storage = ReminderStorage(
         notificationScheduler: FakeReminderNotificationScheduler(),
       );
@@ -177,6 +181,11 @@ void main() {
       await _pumpFrames(tester);
       await _pumpFrames(tester);
 
+      await tester.scrollUntilVisible(
+        find.text('New reminder'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('New reminder'), findsOneWidget);
       expect(
         (await storage.getReminders())
@@ -186,8 +195,6 @@ void main() {
       );
       expect(await storage.getReminders(), hasLength(5));
 
-      await tester.drag(find.byType(Scrollable).first, const Offset(0, -240));
-      await _pumpFrames(tester);
       await tester.tap(find.text('New reminder'));
       await _pumpFrames(tester);
       await tester.enterText(
@@ -200,6 +207,11 @@ void main() {
       await _pumpFrames(tester);
 
       expect(find.text('New reminder'), findsNothing);
+      await tester.scrollUntilVisible(
+        find.text('Edited reminder'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('Edited reminder'), findsOneWidget);
       expect(await storage.getReminders(), hasLength(5));
 
@@ -258,6 +270,10 @@ void main() {
     expect(find.text('No reminders yet'), findsOneWidget);
     expect(find.text('Your reminders will appear here.'), findsOneWidget);
     expect(find.byTooltip('Add reminder'), findsOneWidget);
+    final addButton = tester.widget<IconButton>(
+      find.byKey(const ValueKey('reminders-empty-add')),
+    );
+    expect(addButton.style?.shape?.resolve({}), isA<CircleBorder>());
   });
 
   testWidgets('shows loading and recoverable error states', (tester) async {

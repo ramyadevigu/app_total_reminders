@@ -5,18 +5,37 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:app_smarana/app/app.dart';
 import 'package:app_smarana/features/calender/calender_screen.dart';
 import 'package:app_smarana/features/notes/notes_screen.dart';
+import 'package:app_smarana/features/my_day/my_day_screen.dart';
 import 'package:app_smarana/features/reminders/reminders_screen.dart';
 import 'package:app_smarana/features/time_tools/stopwatch_screen.dart';
 import 'package:app_smarana/features/time_tools/timer_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets('global drawer navigates to My Day', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const AppSmarana());
+    for (var frame = 0; frame < 6; frame++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.byKey(const ValueKey('global-navigation-button')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('navigation-myDay')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('navigation-myDay')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(MyDayScreen), findsOneWidget);
+  });
+
   testWidgets('preserves tab state while switching destinations', (
     WidgetTester tester,
   ) async {
@@ -40,7 +59,13 @@ void main() {
   });
 
   testWidgets('app starts on the calendar screen', (WidgetTester tester) async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({
+      'stopwatchState': jsonEncode({
+        'accumulatedMs': 1000,
+        'runningSinceMs': null,
+        'laps': <Map<String, int>>[],
+      }),
+    });
     await tester.pumpWidget(const AppSmarana());
 
     expect(find.byType(CalendarScreen), findsOneWidget);
@@ -50,16 +75,25 @@ void main() {
         .widgetList<NavigationDestination>(find.byType(NavigationDestination))
         .map((destination) => destination.label)
         .toList();
-    expect(destinations, ['Calendar', 'Notes', 'Alarms', 'Stopwatch', 'Timer']);
+    expect(destinations, [
+      'Calendar',
+      'Notes',
+      'Alarms',
+      'Stopwatch',
+      'Timer',
+    ]);
     final navigationBar = tester.widget<NavigationBar>(
       find.byType(NavigationBar),
     );
     final colorScheme = Theme.of(tester.element(find.byType(NavigationBar)))
         .colorScheme;
-    expect(navigationBar.indicatorColor, colorScheme.primary);
+    expect(
+      navigationBar.indicatorColor,
+      colorScheme.primary.withValues(alpha: 0.12),
+    );
     expect(
       tester.widget<Icon>(find.byIcon(Icons.calendar_month)).color,
-      colorScheme.onPrimary,
+      colorScheme.primary,
     );
     for (final key in [
       'nav-calendar',
@@ -79,15 +113,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Settings'), findsOneWidget);
     expect(find.text('Help'), findsOneWidget);
-    expect(find.text('Send Feedback'), findsOneWidget);
+    expect(find.text('Send Feedback'), findsNothing);
     expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
     expect(find.byIcon(Icons.help_outline), findsOneWidget);
-    expect(find.byIcon(Icons.feedback_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.feedback_outlined), findsNothing);
 
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Appearance'), findsOneWidget);
-    await tester.pageBack();
+    await tester.tap(find.byKey(const ValueKey('settings-back-button')));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('nav-notes')));
@@ -104,7 +138,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('nav-stopwatch')));
     await tester.pumpAndSettle();
     expect(find.byType(StopwatchScreen), findsOneWidget);
-    expect(find.text('00:00:00.00'), findsOneWidget);
+    expect(find.text('00:00:01.00'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('stopwatch-primary-action')));
     await tester.pump(const Duration(milliseconds: 120));
@@ -121,7 +155,10 @@ void main() {
     expect(find.text('Start'), findsOneWidget);
     expect(find.text('Reset'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('stopwatch-secondary-action')));
+    await tester.tap(find.byKey(const ValueKey('stopwatch-reset-action')));
+    await tester.pumpAndSettle();
+    expect(find.text('Reset stopwatch?'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('stopwatch-reset-confirm')));
     await tester.pump();
     expect(find.text('00:00:00.00'), findsOneWidget);
 

@@ -44,6 +44,10 @@ dependencies:
   share_plus: ^12.0.1
   path_provider: ^2.1.5
   open_filex: ^4.7.0
+  firebase_core: ^4.15.0
+  firebase_analytics: ^12.6.0
+  firebase_auth: ^6.7.0
+  google_sign_in: ^7.2.0
 
 dev_dependencies:
   flutter_test:
@@ -66,10 +70,6 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
-
-  assets:
-    - assets/images/background.png
-    - assets/images/transparent-logo.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:
