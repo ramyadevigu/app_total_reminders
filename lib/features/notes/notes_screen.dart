@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 
@@ -32,7 +33,6 @@ class NotesScreen extends StatefulWidget {
     this.onWorkspaceChanged,
     this.onOpenSettings,
     this.onOpenHelp,
-    this.onOpenFeedback,
     this.initialNotebooks,
     this.workspaceStorage,
     this.useInternalNavigationDrawer = true,
@@ -45,7 +45,6 @@ class NotesScreen extends StatefulWidget {
   final VoidCallback? onWorkspaceChanged;
   final Future<void> Function()? onOpenSettings;
   final Future<void> Function()? onOpenHelp;
-  final Future<void> Function()? onOpenFeedback;
   final List<Notebook>? initialNotebooks;
   final NoteWorkspaceStorage? workspaceStorage;
   final bool useInternalNavigationDrawer;
@@ -157,7 +156,7 @@ class NotesScreenState extends State<NotesScreen> {
         _isLoading = false;
         _storageError = 'Notes could not be restored. Changes may not persist.';
       });
-      debugPrint('Notes workspace restore failed: $error');
+      developer.log('Notes workspace restore failed', error: error);
     }
   }
 
@@ -178,7 +177,7 @@ class NotesScreenState extends State<NotesScreen> {
       setState(() {
         _storageError = 'Notes could not be saved. Check device storage.';
       });
-      debugPrint('Notes workspace save failed: $error');
+      developer.log('Notes workspace save failed', error: error);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Notes could not be saved.')),
       );
@@ -385,7 +384,7 @@ class NotesScreenState extends State<NotesScreen> {
       setState(() {
         _storageError ??= 'Reminder dates could not be loaded. Notes are sorted by update time.';
       });
-      debugPrint('Notes reminder index restore failed: $error');
+      developer.log('Notes reminder index restore failed', error: error);
     }
   }
 
@@ -436,6 +435,14 @@ class NotesScreenState extends State<NotesScreen> {
     final load = _loadWorkspace();
     _workspaceLoadFuture = load;
     unawaited(load);
+  }
+
+  void focusSearch() {
+    setState(() {
+      _destination = _NotesDestination.notes;
+      _selectedLabel = null;
+    });
+    _searchFocusNode.requestFocus();
   }
 
   void searchFor(String query) {
@@ -614,6 +621,58 @@ class NotesScreenState extends State<NotesScreen> {
       _selectedLabel = null;
     });
     Navigator.of(context).pop();
+  }
+
+  void _selectFilterDestination(_NotesDestination destination) {
+    setState(() {
+      _destination = destination;
+      _selectedLabel = null;
+    });
+  }
+
+  Widget _buildFilterChips(BuildContext context) {
+    final label = _selectedLabel;
+    return SingleChildScrollView(
+      key: const ValueKey('notes-filter-chips'),
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          ChoiceChip(
+            key: const ValueKey('notes-filter-all'),
+            label: const Text('All notes'),
+            selected: _destination == _NotesDestination.notes && label == null,
+            onSelected: (_) => _selectFilterDestination(_NotesDestination.notes),
+          ),
+          const SizedBox(width: 8),
+          ChoiceChip(
+            key: const ValueKey('notes-filter-archive'),
+            label: const Text('Archive'),
+            selected: _destination == _NotesDestination.archive,
+            onSelected: (_) =>
+                _selectFilterDestination(_NotesDestination.archive),
+          ),
+          const SizedBox(width: 8),
+          ChoiceChip(
+            key: const ValueKey('notes-filter-deleted'),
+            label: const Text('Deleted'),
+            selected: _destination == _NotesDestination.deleted,
+            onSelected: (_) =>
+                _selectFilterDestination(_NotesDestination.deleted),
+          ),
+          if (label != null) ...[
+            const SizedBox(width: 8),
+            InputChip(
+              key: const ValueKey('notes-filter-label'),
+              avatar: const Icon(Icons.label_outline_rounded, size: 18),
+              label: Text(_labelName(label)),
+              selected: true,
+              onDeleted: () => _selectFilterDestination(_NotesDestination.notes),
+              deleteButtonTooltipMessage: 'Clear label filter',
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   void _selectLabel(String label) {
@@ -881,6 +940,8 @@ class NotesScreenState extends State<NotesScreen> {
                                 ],
                               ),
                             ),
+                          _buildFilterChips(context),
+                          const SizedBox(height: 12),
                           if (_destination == _NotesDestination.notes) ...[
                             _buildRecentNotesSection(
                               context,
@@ -1036,15 +1097,9 @@ class NotesScreenState extends State<NotesScreen> {
               context,
               key: const ValueKey('notes-drawer-help'),
               icon: Icons.help_outline_rounded,
-              label: 'Help & Feedback',
+              label: 'Help',
               selected: false,
-              onTap: () async {
-                if (widget.onOpenHelp != null) {
-                  await _openDrawerAction(widget.onOpenHelp);
-                } else {
-                  await _openDrawerAction(widget.onOpenFeedback);
-                }
-              },
+              onTap: () => _openDrawerAction(widget.onOpenHelp),
             ),
           ],
         ),

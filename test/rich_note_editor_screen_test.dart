@@ -24,8 +24,7 @@ void main() {
       find.byKey(const ValueKey('rich-note-title-field')),
     );
     expect(titleField.controller?.text, '');
-    expect(titleField.decoration?.hintText, 'Title');
-    expect(titleField.style?.fontSize, 24);
+    expect(titleField.decoration?.hintText, 'Untitled');
     expect(titleField.style?.fontWeight, FontWeight.w700);
     expect(titleField.decoration?.filled, isFalse);
     expect(titleField.decoration?.border, InputBorder.none);

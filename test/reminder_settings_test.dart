@@ -83,7 +83,9 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('open-settings')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Notification only'));
+    await tester.tap(find.byKey(const ValueKey('settings-default-notification')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('notification-default-notificationOnly')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('settings-default-ringtone')));
     await tester.pumpAndSettle();
@@ -152,5 +154,92 @@ void main() {
     expect(savedReminder.soundUri, 'content://alarms/morning-bell');
     expect(savedReminder.snoozeDurationMinutes, 15);
     expect(savedReminder.vibrate, isFalse);
+  });
+
+  testWidgets('snooze default is editable and applies to new reminders', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1080, 1920);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    SharedPreferences.setMockInitialValues({});
+    const preferencesStore = ReminderPreferencesStore();
+    final storage = ReminderStorage(
+      notificationScheduler: FakeReminderNotificationScheduler(),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Column(
+              children: [
+                TextButton(
+                  key: const ValueKey('open-settings'),
+                  onPressed: () => Navigator.of(context).push<void>(
+                    MaterialPageRoute<void>(
+                      builder: (_) => SettingsScreen(
+                        selectedThemeMode: ThemeMode.system,
+                        selectedCalendarViewMode: CalendarViewMode.month,
+                        preferencesStore: preferencesStore,
+                        onThemeModeChanged: (_) async {},
+                        onCalendarViewModeChanged: (_) async {},
+                      ),
+                    ),
+                  ),
+                  child: const Text('Settings'),
+                ),
+                TextButton(
+                  key: const ValueKey('open-add-reminder'),
+                  onPressed: () => Navigator.of(context).push<Reminder>(
+                    MaterialPageRoute<Reminder>(
+                      builder: (_) => AddReminderScreen(
+                        storage: storage,
+                        preferencesStore: preferencesStore,
+                        initialDate: DateTime(2030, 1, 15),
+                      ),
+                    ),
+                  ),
+                  child: const Text('Add reminder'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('open-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-default-snooze')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('snooze-default-30')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('settings-default-snooze')),
+        matching: find.text('30 minutes'),
+      ),
+      findsOneWidget,
+    );
+    expect((await preferencesStore.loadDefaults()).snoozeDurationMinutes, 30);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('open-add-reminder')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('title-field')),
+      'Snooze default check',
+    );
+    await tester.ensureVisible(find.byKey(const ValueKey('save-reminder')));
+    await tester.tap(find.byKey(const ValueKey('save-reminder')));
+    await tester.pumpAndSettle();
+
+    final savedReminder = (await storage.getReminders()).single;
+    expect(savedReminder.snoozeDurationMinutes, 30);
   });
 }

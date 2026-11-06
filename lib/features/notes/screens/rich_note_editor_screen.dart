@@ -2244,6 +2244,32 @@ class _RichNoteEditorScreenState extends State<RichNoteEditorScreen> {
                     ),
                   ],
                 ),
+          title: TextField(
+            key: const ValueKey('rich-note-title-field'),
+            controller: _titleController,
+            textCapitalization: TextCapitalization.sentences,
+            textInputAction: TextInputAction.next,
+            maxLines: 1,
+            decoration: InputDecoration(
+              hintText: 'Untitled',
+              hintStyle: TextStyle(
+                color: noteForeground.withValues(alpha: 0.65),
+              ),
+              filled: false,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              disabledBorder: InputBorder.none,
+              errorBorder: InputBorder.none,
+              focusedErrorBorder: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: noteForeground,
+            ),
+          ),
           actions: [
             IconButton(
               key: const ValueKey('note-editor-pin-button'),
@@ -2300,35 +2326,7 @@ class _RichNoteEditorScreenState extends State<RichNoteEditorScreen> {
         body: SafeArea(
           child: Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(22, 34, 22, 4),
-                child: TextField(
-                  key: const ValueKey('rich-note-title-field'),
-                  controller: _titleController,
-                  textCapitalization: TextCapitalization.sentences,
-                  textInputAction: TextInputAction.next,
-                  maxLines: 1,
-                  decoration: InputDecoration(
-                    hintText: 'Title',
-                    hintStyle: TextStyle(
-                      color: noteForeground.withValues(alpha: 0.65),
-                    ),
-                    filled: false,
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    disabledBorder: InputBorder.none,
-                    errorBorder: InputBorder.none,
-                    focusedErrorBorder: InputBorder.none,
-                    isDense: true,
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: noteForeground,
-                  ),
-                ),
-              ),
+              const SizedBox(height: 8),
               _buildNoteMetadata(),
               Expanded(
                 child: DefaultTextStyle.merge(

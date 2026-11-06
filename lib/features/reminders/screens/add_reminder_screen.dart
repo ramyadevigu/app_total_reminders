@@ -134,6 +134,7 @@ class _AddReminderScreenState extends State<AddReminderScreen> {
         _soundUri = defaults.soundUri;
         _soundName = defaults.soundName;
         _vibrate = defaults.vibrate;
+        _snoozeDurationMinutes = defaults.snoozeDurationMinutes;
         _defaultsReady = true;
       });
     } on Exception {

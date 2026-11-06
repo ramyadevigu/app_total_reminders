@@ -40,6 +40,23 @@ void main() {
     },
   );
 
+  test('timer completion alert uses the notification platform', () async {
+    final notifications = _FakeNotificationPlatform();
+    final service = _service(
+      now: () => DateTime(2026, 9, 29, 8),
+      notifications: notifications,
+      alarms: _FakeRecurrenceAlarmPlatform(),
+      alarmRuntime: _FakeAlarmRuntimePlatform(),
+    );
+
+    await service.showTimerFinished('5m');
+
+    final alert = notifications.timerAlerts.single;
+    expect(alert.title, 'Timer finished');
+    expect(alert.body, '5m');
+    expect(notifications.scheduled, isEmpty);
+  });
+
   test(
     'notification-only reminders never use the selected alarm sound',
     () async {
@@ -472,6 +489,7 @@ Reminder _reminder(
 
 class _FakeNotificationPlatform implements NotificationPlatform {
   final scheduled = <int, _ScheduledNotification>{};
+  final timerAlerts = <_TimerAlert>[];
   final permissionRequests = <bool>[];
 
   @override
@@ -506,6 +524,23 @@ class _FakeNotificationPlatform implements NotificationPlatform {
   Future<void> cancel(int id) async {
     scheduled.remove(id);
   }
+
+  @override
+  Future<void> showTimerFinished({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    timerAlerts.add(_TimerAlert(id: id, title: title, body: body));
+  }
+}
+
+class _TimerAlert {
+  const _TimerAlert({required this.id, required this.title, required this.body});
+
+  final int id;
+  final String title;
+  final String body;
 }
 
 class _FakeRecurrenceAlarmPlatform implements RecurrenceAlarmPlatform {

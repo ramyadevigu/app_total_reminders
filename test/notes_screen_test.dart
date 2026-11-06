@@ -226,6 +226,25 @@ void main() {
     expect(find.text('Deleted notes will appear here.'), findsOneWidget);
   });
 
+  testWidgets('filter chips switch between all notes, archive, and deleted', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: NotesScreen()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('notes-filter-archive')));
+    await tester.pumpAndSettle();
+    expect(find.text('No archived notes.'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('notes-filter-deleted')));
+    await tester.pumpAndSettle();
+    expect(find.text('Deleted notes will appear here.'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('notes-filter-all')));
+    await tester.pumpAndSettle();
+    expect(find.text('No notes yet. Create a note to get started.'), findsOneWidget);
+  });
+
   testWidgets('Notes home hides notebook controls', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(home: NotesScreen(initialNotebooks: [])),
@@ -879,6 +898,33 @@ void main() {
     expect(find.text('Saved'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('failed workspace restore shows a banner with retry', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesScreen(
+          workspaceStorage: _UnreadableNoteWorkspaceStorage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Notes could not be restored. Changes may not persist.'),
+      findsOneWidget,
+    );
+    expect(find.widgetWithText(TextButton, 'Retry'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+class _UnreadableNoteWorkspaceStorage extends NoteWorkspaceStorage {
+  @override
+  Future<List<Notebook>> loadWorkspace() async {
+    throw Exception('Simulated storage read failure');
+  }
 }
 
 class _FailingNoteWorkspaceStorage extends NoteWorkspaceStorage {

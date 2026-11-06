@@ -9,6 +9,7 @@ import '../features/notes/notes_screen.dart';
 import '../features/my_day/my_day_screen.dart';
 import '../features/notes/models/note_workspace_models.dart';
 import '../features/auth/services/google_auth_service.dart';
+import '../features/auth/screens/login_screen.dart';
 import '../features/auth/screens/profile_screen.dart';
 import '../features/notes/services/note_workspace_storage.dart';
 import '../features/reminders/screens/add_reminder_screen.dart';
@@ -26,8 +27,9 @@ import '../theme/app_design_tokens.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_preference_store.dart';
 import '../widgets/app_navigation_drawer.dart';
+import '../widgets/fade_indexed_stack.dart';
 
-enum _AppMenuAction { settings, help, feedback }
+enum _AppMenuAction { settings, help }
 
 class AppSmarana extends StatefulWidget {
   const AppSmarana({
@@ -392,6 +394,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final GlobalKey<NotesScreenState> _notesScreenKey =
       GlobalKey<NotesScreenState>();
   final NoteWorkspaceStorage _noteWorkspaceStorage = NoteWorkspaceStorage();
+  final Map<AppNavigationDestination, Widget> _navigationDrawers = {};
+  late final Widget _appMenu = _buildAppMenu();
   final ReminderPreferencesStore _preferencesStore =
       const ReminderPreferencesStore();
   CalendarViewMode _calendarViewMode = CalendarViewMode.month;
@@ -442,72 +446,99 @@ class _HomeScreenState extends State<HomeScreen> {
         body: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1280),
-            child: IndexedStack(
+            child: FadeIndexedStack(
               index: _showingMyDay ? 5 : _currentIndex,
               children: List<Widget>.generate(6, _buildTab),
             ),
           ),
         ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _currentIndex,
-          indicatorColor: colorScheme.primary.withValues(
-            alpha: Theme.of(context).brightness == Brightness.light
-                ? 0.12
-                : 0.2,
+        bottomNavigationBar: NavigationBarTheme(
+          data: _showingMyDay
+              ? NavigationBarTheme.of(context).copyWith(
+                  labelTextStyle: WidgetStatePropertyAll(
+                    Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  iconTheme: WidgetStatePropertyAll(
+                    IconThemeData(color: colorScheme.onSurfaceVariant),
+                  ),
+                )
+              : NavigationBarTheme.of(context),
+          child: NavigationBar(
+            selectedIndex: _currentIndex,
+            indicatorColor: _showingMyDay
+                ? Colors.transparent
+                : colorScheme.primary.withValues(
+                    alpha: Theme.of(context).brightness == Brightness.light
+                        ? 0.12
+                        : 0.2,
+                  ),
+            onDestinationSelected: (index) {
+              setState(() {
+                _visitedTabs.add(index);
+                _currentIndex = index;
+                _showingMyDay = false;
+              });
+            },
+            destinations: [
+              _tabDestination(
+                context,
+                key: const ValueKey('nav-calendar'),
+                icon: Icons.calendar_month_outlined,
+                selectedIcon: Icons.calendar_month,
+                label: 'Calendar',
+              ),
+              _tabDestination(
+                context,
+                key: const ValueKey('nav-notes'),
+                icon: Icons.sticky_note_2_outlined,
+                selectedIcon: Icons.sticky_note_2,
+                label: 'Notes',
+              ),
+              _tabDestination(
+                context,
+                key: const ValueKey('nav-alarms'),
+                icon: Icons.notifications_none,
+                selectedIcon: Icons.notifications_active,
+                label: 'Alarms',
+              ),
+              _tabDestination(
+                context,
+                key: const ValueKey('nav-stopwatch'),
+                icon: Icons.av_timer_outlined,
+                selectedIcon: Icons.av_timer,
+                label: 'Stopwatch',
+              ),
+              _tabDestination(
+                context,
+                key: const ValueKey('nav-timer'),
+                icon: Icons.hourglass_bottom_outlined,
+                selectedIcon: Icons.hourglass_bottom,
+                label: 'Timer',
+              ),
+            ],
           ),
-          onDestinationSelected: (index) {
-            setState(() {
-              _visitedTabs.add(index);
-              _currentIndex = index;
-              _showingMyDay = false;
-            });
-          },
-          destinations: [
-            NavigationDestination(
-              key: ValueKey('nav-calendar'),
-              icon: Icon(Icons.calendar_month_outlined),
-              selectedIcon: Icon(
-                Icons.calendar_month,
-                color: colorScheme.primary,
-              ),
-              label: 'Calendar',
-            ),
-            NavigationDestination(
-              key: ValueKey('nav-notes'),
-              icon: Icon(Icons.sticky_note_2_outlined),
-              selectedIcon: Icon(
-                Icons.sticky_note_2,
-                color: colorScheme.primary,
-              ),
-              label: 'Notes',
-            ),
-            NavigationDestination(
-              key: ValueKey('nav-alarms'),
-              icon: Icon(Icons.notifications_none),
-              selectedIcon: Icon(
-                Icons.notifications_active,
-                color: colorScheme.primary,
-              ),
-              label: 'Alarms',
-            ),
-            NavigationDestination(
-              key: ValueKey('nav-stopwatch'),
-              icon: Icon(Icons.av_timer_outlined),
-              selectedIcon: Icon(Icons.av_timer, color: colorScheme.primary),
-              label: 'Stopwatch',
-            ),
-            NavigationDestination(
-              key: ValueKey('nav-timer'),
-              icon: Icon(Icons.hourglass_bottom_outlined),
-              selectedIcon: Icon(
-                Icons.hourglass_bottom,
-                color: colorScheme.primary,
-              ),
-              label: 'Timer',
-            ),
-          ],
         ),
       ),
+    );
+  }
+
+  NavigationDestination _tabDestination(
+    BuildContext context, {
+    required Key key,
+    required IconData icon,
+    required IconData selectedIcon,
+    required String label,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return NavigationDestination(
+      key: key,
+      icon: Icon(icon),
+      selectedIcon: _showingMyDay
+          ? Icon(icon)
+          : Icon(selectedIcon, color: colorScheme.primary),
+      label: label,
     );
   }
 
@@ -520,7 +551,7 @@ class _HomeScreenState extends State<HomeScreen> {
       0 => CalendarScreen(
         viewMode: _calendarViewMode,
         onViewModeChanged: _changeCalendarViewMode,
-        appMenu: _buildAppMenu(),
+        appMenu: _appMenu,
         navigationDrawer: _buildNavigationDrawer(
           AppNavigationDestination.calendar,
         ),
@@ -528,7 +559,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       1 => NotesScreen(
         key: _notesScreenKey,
-        appMenu: _buildAppMenu(),
+        appMenu: _appMenu,
         navigationDrawer: _buildNavigationDrawer(
           AppNavigationDestination.notes,
         ),
@@ -537,32 +568,32 @@ class _HomeScreenState extends State<HomeScreen> {
         onWorkspaceChanged: _refreshNoteWorkspace,
         onOpenSettings: () => _handleAppMenuAction(_AppMenuAction.settings),
         onOpenHelp: () => _handleAppMenuAction(_AppMenuAction.help),
-        onOpenFeedback: () => _handleAppMenuAction(_AppMenuAction.feedback),
       ),
       2 => RemindersScreen(
         title: 'Alarms',
-        appMenu: _buildAppMenu(),
+        appMenu: _appMenu,
         navigationDrawer: _buildNavigationDrawer(
           AppNavigationDestination.reminders,
         ),
         useInternalNavigationDrawer: false,
       ),
       3 => StopwatchScreen(
-        appMenu: _buildAppMenu(),
+        appMenu: _appMenu,
         navigationDrawer: _buildNavigationDrawer(
           AppNavigationDestination.stopwatch,
         ),
         useInternalNavigationDrawer: false,
       ),
       4 => TimerScreen(
-        appMenu: _buildAppMenu(),
+        appMenu: _appMenu,
         navigationDrawer: _buildNavigationDrawer(
           AppNavigationDestination.timer,
         ),
         useInternalNavigationDrawer: false,
+        onTimerFinished: NotificationService.instance.showTimerFinished,
       ),
       5 => MyDayScreen(
-        appMenu: _buildAppMenu(),
+        appMenu: _appMenu,
         navigationDrawer: _buildNavigationDrawer(
           AppNavigationDestination.myDay,
         ),
@@ -577,13 +608,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildNavigationDrawer(AppNavigationDestination selected) {
-    return AppNavigationDrawer(
-      selectedDestination: selected,
-      workspaceStorage: _noteWorkspaceStorage,
-      workspaceChanges: _noteWorkspaceRevision,
-      onDestinationSelected: _selectNavigationDestination,
-      onNotebookSelected: _openNotebookFromDrawer,
-      onNoteSelected: _openNoteFromDrawer,
+    return _navigationDrawers.putIfAbsent(
+      selected,
+      () => AppNavigationDrawer(
+        selectedDestination: selected,
+        workspaceStorage: _noteWorkspaceStorage,
+        workspaceChanges: _noteWorkspaceRevision,
+        onDestinationSelected: _selectNavigationDestination,
+        onNotebookSelected: _openNotebookFromDrawer,
+        onNoteSelected: _openNoteFromDrawer,
+      ),
     );
   }
 
@@ -602,10 +636,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           );
+        } else {
+          Navigator.of(context).push<void>(
+            MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
+          );
         }
         return;
       case AppNavigationDestination.search:
-        _showSearch();
+        _focusNotesSearch();
         return;
       case AppNavigationDestination.settings:
         _handleAppMenuAction(_AppMenuAction.settings);
@@ -649,39 +687,10 @@ class _HomeScreenState extends State<HomeScreen> {
     _noteWorkspaceRevision.value++;
   }
 
-  Future<void> _showSearch() async {
-    final controller = TextEditingController();
-    final query = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Search notes'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textInputAction: TextInputAction.search,
-          decoration: const InputDecoration(
-            hintText: 'Search titles and note content',
-            prefixIcon: Icon(Icons.search_rounded),
-          ),
-          onSubmitted: (value) => Navigator.of(context).pop(value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Search'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (query == null || query.trim().isEmpty) return;
+  void _focusNotesSearch() {
     _navigateToTab(1);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _notesScreenKey.currentState?.searchFor(query.trim());
+      _notesScreenKey.currentState?.focusSearch();
     });
   }
 
@@ -706,14 +715,6 @@ class _HomeScreenState extends State<HomeScreen> {
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.help_outline),
             title: Text('Help'),
-          ),
-        ),
-        PopupMenuItem<_AppMenuAction>(
-          value: _AppMenuAction.feedback,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.feedback_outlined),
-            title: Text('Send Feedback'),
           ),
         ),
       ],
@@ -745,24 +746,12 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.help_outline),
             title: const Text('Help'),
             content: const Text(
-              'Use Calendar to view reminders, Notes to save ideas, and '
-              'Alarms to manage your reminders.',
+              'Calendar shows your reminders by day, week, or month.\n\n'
+              'Notes keeps your ideas, with Archive and Deleted filters.\n\n'
+              'Alarms manages your reminders and their alerts.\n\n'
+              'Stopwatch and Timer measure time, with laps and saved timers.\n\n'
+              'Settings controls theme, accent color, snooze, and notifications.',
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
-        );
-      case _AppMenuAction.feedback:
-        await showDialog<void>(
-          context: context,
-          builder: (context) => AlertDialog(
-            icon: const Icon(Icons.feedback_outlined),
-            title: const Text('Send Feedback'),
-            content: const Text('Feedback delivery is not configured yet.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),

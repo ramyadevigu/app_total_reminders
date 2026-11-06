@@ -339,7 +339,7 @@ void main() {
       }
       expect(_activeBrightness(tester), brightness);
 
-      await tester.tap(find.byType(FloatingActionButton));
+      await tester.tap(find.byType(FloatingActionButton).hitTestable());
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('title-field')), findsOneWidget);
       expect(
@@ -380,7 +380,7 @@ Future<void> _openSettings(WidgetTester tester) async {
   for (var frame = 0; frame < 6; frame++) {
     await tester.pump(const Duration(milliseconds: 100));
   }
-  await tester.tap(find.byKey(const ValueKey('app-overflow-menu')));
+  await tester.tap(find.byKey(const ValueKey('app-overflow-menu')).hitTestable());
   for (var frame = 0; frame < 6; frame++) {
     await tester.pump(const Duration(milliseconds: 100));
   }

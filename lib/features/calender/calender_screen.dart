@@ -87,6 +87,10 @@ class _CalendarScreenState extends State<CalendarScreen>
   late CalendarViewMode _activeViewMode;
   List<Reminder> _reminders = [];
   Map<DateTime, List<CalendarOccurrence>> _occurrencesByDate = {};
+  List<Reminder>? _visibleCacheReminders;
+  DateTime? _visibleCacheStart;
+  DateTime? _visibleCacheEnd;
+  Map<DateTime, List<CalendarOccurrence>>? _visibleCacheOccurrences;
   List<CalendarOccurrence> _upcomingOccurrences = [];
   int _monthTransitionDirection = 1;
   late final AnimationController _monthSettleController;
@@ -239,11 +243,22 @@ class _CalendarScreenState extends State<CalendarScreen>
       case CalendarViewMode.month:
         break;
     }
+    if (identical(_visibleCacheReminders, _reminders) &&
+        _visibleCacheStart == start &&
+        _visibleCacheEnd == endExclusive &&
+        _visibleCacheOccurrences != null) {
+      _occurrencesByDate = _visibleCacheOccurrences!;
+      return;
+    }
     _occurrencesByDate = _calendarService.occurrencesBetween(
       _reminders,
       start: start,
       endExclusive: endExclusive,
     );
+    _visibleCacheReminders = _reminders;
+    _visibleCacheStart = start;
+    _visibleCacheEnd = endExclusive;
+    _visibleCacheOccurrences = _occurrencesByDate;
   }
 
   void _refreshUpcomingOccurrences() {
@@ -1522,7 +1537,6 @@ class _CalendarScreenState extends State<CalendarScreen>
             IconButton(
               key: const ValueKey('calendar-previous-week'),
               tooltip: 'Previous week',
-              visualDensity: VisualDensity.compact,
               onPressed: () => _changeWeek(-1),
               icon: const Icon(Icons.chevron_left),
             ),
@@ -1542,7 +1556,6 @@ class _CalendarScreenState extends State<CalendarScreen>
             IconButton(
               key: const ValueKey('calendar-next-week'),
               tooltip: 'Next week',
-              visualDensity: VisualDensity.compact,
               onPressed: () => _changeWeek(1),
               icon: const Icon(Icons.chevron_right),
             ),
@@ -2160,7 +2173,6 @@ class _CalendarScreenState extends State<CalendarScreen>
             builder: (context) => IconButton(
               key: const ValueKey('global-navigation-button'),
               tooltip: 'Open navigation menu',
-              visualDensity: VisualDensity.compact,
               onPressed: () => AppNavigationDrawerHost.openDrawer(context),
               icon: const Icon(Icons.menu_rounded),
             ),
@@ -2172,7 +2184,6 @@ class _CalendarScreenState extends State<CalendarScreen>
               tooltip: _activeViewMode == CalendarViewMode.day
                   ? 'Back to Week'
                   : 'Back to Month',
-              visualDensity: VisualDensity.compact,
               onPressed: () => _selectViewMode(
                 _activeViewMode == CalendarViewMode.day
                     ? CalendarViewMode.week

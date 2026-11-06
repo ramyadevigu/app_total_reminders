@@ -56,6 +56,12 @@ abstract interface class NotificationPlatform {
   });
 
   Future<void> cancel(int id);
+
+  Future<void> showTimerFinished({
+    required int id,
+    required String title,
+    required String body,
+  });
 }
 
 abstract interface class RecurrenceAlarmPlatform {
@@ -175,6 +181,17 @@ class NotificationService implements ReminderNotificationScheduler {
         await _storedNotificationIdFor(reminderId) ??
         _notificationIdHash(reminderId);
     await _alarmRuntimePlatform.snooze(id);
+  }
+
+  static const _timerNotificationId = 0x7a11;
+
+  Future<void> showTimerFinished(String timerLabel) async {
+    await initialize();
+    await _notificationPlatform.showTimerFinished(
+      id: _timerNotificationId,
+      title: 'Timer finished',
+      body: timerLabel,
+    );
   }
 
   String? takeInitialReminderId() {
@@ -773,6 +790,32 @@ class _FlutterLocalNotificationPlatform implements NotificationPlatform {
   @override
   Future<void> cancel(int id) async {
     await _plugin.cancel(id: id);
+  }
+
+  @override
+  Future<void> showTimerFinished({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    await _plugin.show(
+      id: id,
+      title: title,
+      body: body,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'reminders',
+          'Reminders',
+          channelDescription: 'Scheduled reminder notifications',
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
+          category: AndroidNotificationCategory.reminder,
+        ),
+        windows: WindowsNotificationDetails(),
+      ),
+    );
   }
 }
 

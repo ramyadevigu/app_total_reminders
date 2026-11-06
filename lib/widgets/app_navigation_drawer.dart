@@ -108,7 +108,10 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
   }
 
   void _reloadNotebooks() {
-    setState(() => _notebooksFuture = _loadNotebooks());
+    final future = _loadNotebooks();
+    setState(() {
+      _notebooksFuture = future;
+    });
   }
 
   Future<List<Notebook>> _loadNotebooks() {
@@ -152,7 +155,7 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
                               ),
                               const SizedBox(width: 12),
                               Text(
-                                'Profile',
+                                'Total Reminders',
                                 style: Theme.of(context).textTheme.titleMedium
                                     ?.copyWith(fontWeight: FontWeight.w700),
                               ),

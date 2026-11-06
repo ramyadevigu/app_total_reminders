@@ -72,10 +72,15 @@ class ReminderPreferencesStore {
       notificationMode: notificationMode,
       soundUri: preferences.getString(_soundUriKey),
       soundName: preferences.getString(_soundNameKey) ?? 'Default',
-      snoozeDurationMinutes: 15,
+      snoozeDurationMinutes: _readSnoozeDuration(preferences),
       vibrate: preferences.getBool(_vibrateKey) ?? true,
       calendarViewMode: calendarViewMode,
     );
+  }
+
+  static int _readSnoozeDuration(SharedPreferences preferences) {
+    final minutes = preferences.getInt(_snoozeDurationKey);
+    return minutes != null && minutes > 0 ? minutes : 15;
   }
 
   Future<void> saveDefaults(ReminderDefaults defaults) async {

@@ -324,7 +324,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 key: const ValueKey('settings-color-theme-picker'),
                 icon: Icons.palette_outlined,
                 title: 'Color theme',
-                subtitle: 'Choose the app color appearance',
+                subtitle: 'Preset palettes that set the app accent',
                 trailing: _ColorThemePreview(color: _selectedAccentColor),
                 onTap: _selectColorTheme,
               ),
@@ -333,7 +333,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 key: const ValueKey('settings-accent-color-picker'),
                 icon: Icons.color_lens_outlined,
                 title: 'Custom accent color',
-                subtitle: 'Choose any app accent color',
+                subtitle: 'Pick any color with the wheel or hex code',
                 trailing: _AccentColorIndicator(color: _selectedAccentColor),
                 onTap: _selectAccentColor,
               ),
@@ -371,35 +371,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _SettingsSection(
             title: 'Notifications',
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(0, 8, 0, 4),
-                child: Text(
-                  'Default notification',
-                  style: Theme.of(context).textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ),
-              RadioGroup<ReminderNotificationMode>(
-                groupValue: _defaults.notificationMode,
-                onChanged: (mode) {
-                  if (mode != null) {
-                    _updateDefaults(_defaults.copyWith(notificationMode: mode));
-                  }
-                },
-                child: const Column(
-                  children: [
-                    RadioListTile<ReminderNotificationMode>(
-                      contentPadding: EdgeInsets.zero,
-                      value: ReminderNotificationMode.alarmAndNotification,
-                      title: Text('Alarm + Notification'),
-                    ),
-                    RadioListTile<ReminderNotificationMode>(
-                      contentPadding: EdgeInsets.zero,
-                      value: ReminderNotificationMode.notificationOnly,
-                      title: Text('Notification only'),
-                    ),
-                  ],
-                ),
+              _SettingsTile(
+                key: const ValueKey('settings-default-notification'),
+                icon: Icons.notifications_outlined,
+                title: 'Default notification',
+                subtitle: _notificationModeLabel(_defaults.notificationMode),
+                onTap: _selectNotificationMode,
               ),
               const _SettingsDivider(),
               _SettingsTile(
@@ -428,14 +405,105 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 key: const ValueKey('settings-default-snooze'),
                 icon: Icons.snooze_outlined,
                 title: 'Snooze duration',
-                subtitle: '15 minutes',
-                showChevron: false,
+                subtitle: _snoozeLabel(_defaults.snoozeDurationMinutes),
+                onTap: _selectSnoozeDuration,
               ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _selectSnoozeDuration() async {
+    final selection = await showModalBottomSheet<int>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (context) => ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.only(bottom: 16),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+            child: Text(
+              'Default snooze duration',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+          ),
+          for (final minutes in _snoozeOptions)
+            ListTile(
+              key: ValueKey('snooze-default-$minutes'),
+              leading: Icon(
+                _defaults.snoozeDurationMinutes == minutes
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+              ),
+              title: Text(_snoozeLabel(minutes)),
+              onTap: () => Navigator.of(context).pop(minutes),
+            ),
+        ],
+      ),
+    );
+    if (selection != null &&
+        mounted &&
+        selection != _defaults.snoozeDurationMinutes) {
+      await _updateDefaults(
+        _defaults.copyWith(snoozeDurationMinutes: selection),
+      );
+    }
+  }
+
+  Future<void> _selectNotificationMode() async {
+    final selection = await showModalBottomSheet<ReminderNotificationMode>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (context) => ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.only(bottom: 16),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+            child: Text(
+              'Default notification',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+          ),
+          for (final mode in ReminderNotificationMode.values)
+            ListTile(
+              key: ValueKey('notification-default-${mode.name}'),
+              leading: Icon(
+                _defaults.notificationMode == mode
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+              ),
+              title: Text(_notificationModeLabel(mode)),
+              onTap: () => Navigator.of(context).pop(mode),
+            ),
+        ],
+      ),
+    );
+    if (selection != null &&
+        mounted &&
+        selection != _defaults.notificationMode) {
+      await _updateDefaults(_defaults.copyWith(notificationMode: selection));
+    }
+  }
+
+  String _notificationModeLabel(ReminderNotificationMode mode) => switch (mode) {
+    ReminderNotificationMode.alarmAndNotification => 'Alarm + Notification',
+    ReminderNotificationMode.notificationOnly => 'Notification only',
+  };
+
+  static const _snoozeOptions = <int>[5, 10, 15, 30, 60];
+
+  String _snoozeLabel(int minutes) {
+    if (minutes >= 60 && minutes % 60 == 0) {
+      final hours = minutes ~/ 60;
+      return hours == 1 ? '1 hour' : '$hours hours';
+    }
+    return '$minutes minutes';
   }
 
   String _calendarViewLabel(CalendarViewMode mode) => switch (mode) {
@@ -497,7 +565,6 @@ class _SettingsTile extends StatelessWidget {
     required this.subtitle,
     this.trailing,
     this.onTap,
-    this.showChevron = true,
   });
 
   final IconData icon;
@@ -505,7 +572,6 @@ class _SettingsTile extends StatelessWidget {
   final String subtitle;
   final Widget? trailing;
   final VoidCallback? onTap;
-  final bool showChevron;
 
   @override
   Widget build(BuildContext context) {
@@ -521,13 +587,7 @@ class _SettingsTile extends StatelessWidget {
       subtitle: Text(subtitle),
       trailing:
           trailing ??
-          (showChevron
-              ? Icon(
-                  Icons.chevron_right,
-                  color: colorScheme.onSurfaceVariant,
-                  size: 22,
-                )
-              : null),
+          Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant, size: 22),
       onTap: onTap,
     );
   }
@@ -863,12 +923,16 @@ class _AccentColorPickerDialogState extends State<_AccentColorPickerDialog> {
                                       color: _color,
                                       shape: BoxShape.circle,
                                       border: Border.all(
-                                        color: Colors.white,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.surface,
                                         width: 3,
                                       ),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.black.withValues(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.shadow.withValues(
                                             alpha: 0.45,
                                           ),
                                           blurRadius: 3,

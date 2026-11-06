@@ -5,6 +5,8 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -57,7 +59,13 @@ void main() {
   });
 
   testWidgets('app starts on the calendar screen', (WidgetTester tester) async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({
+      'stopwatchState': jsonEncode({
+        'accumulatedMs': 1000,
+        'runningSinceMs': null,
+        'laps': <Map<String, int>>[],
+      }),
+    });
     await tester.pumpWidget(const AppSmarana());
 
     expect(find.byType(CalendarScreen), findsOneWidget);
@@ -105,10 +113,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Settings'), findsOneWidget);
     expect(find.text('Help'), findsOneWidget);
-    expect(find.text('Send Feedback'), findsOneWidget);
+    expect(find.text('Send Feedback'), findsNothing);
     expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
     expect(find.byIcon(Icons.help_outline), findsOneWidget);
-    expect(find.byIcon(Icons.feedback_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.feedback_outlined), findsNothing);
 
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
@@ -130,7 +138,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('nav-stopwatch')));
     await tester.pumpAndSettle();
     expect(find.byType(StopwatchScreen), findsOneWidget);
-    expect(find.text('00:00:00.00'), findsOneWidget);
+    expect(find.text('00:00:01.00'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('stopwatch-primary-action')));
     await tester.pump(const Duration(milliseconds: 120));
@@ -147,7 +155,10 @@ void main() {
     expect(find.text('Start'), findsOneWidget);
     expect(find.text('Reset'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('stopwatch-secondary-action')));
+    await tester.tap(find.byKey(const ValueKey('stopwatch-reset-action')));
+    await tester.pumpAndSettle();
+    expect(find.text('Reset stopwatch?'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('stopwatch-reset-confirm')));
     await tester.pump();
     expect(find.text('00:00:00.00'), findsOneWidget);
 

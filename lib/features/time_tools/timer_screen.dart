@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,11 +15,13 @@ class TimerScreen extends StatefulWidget {
     required this.appMenu,
     this.navigationDrawer,
     this.useInternalNavigationDrawer = true,
+    this.onTimerFinished,
   });
 
   final Widget appMenu;
   final Widget? navigationDrawer;
   final bool useInternalNavigationDrawer;
+  final Future<void> Function(String timerLabel)? onTimerFinished;
 
   @override
   State<TimerScreen> createState() => _TimerScreenState();
@@ -77,10 +80,33 @@ class _TimerScreenState extends State<TimerScreen> {
             final id = entry['id'];
             final seconds = entry['seconds'];
             if (id is String && seconds is int && seconds > 0) {
+              final duration = Duration(seconds: seconds);
+              final remainingMs = entry['remainingMs'];
+              final deadlineMs = entry['deadlineMs'];
+              final isRunning = entry['running'] == true;
+              final isFinished = entry['finished'] == true;
+              final label = entry['label'];
+              final deadline = deadlineMs is int
+                  ? DateTime.fromMillisecondsSinceEpoch(deadlineMs)
+                  : null;
+              final remaining = remainingMs is int && remainingMs >= 0
+                  ? Duration(milliseconds: remainingMs)
+                  : duration;
+              final restoresRunning = isRunning && deadline != null;
               loadedTimers.add(
                 _SavedTimer(
                   id: id,
-                  duration: Duration(seconds: seconds),
+                  duration: duration,
+                  label: label is String && label.trim().isNotEmpty
+                      ? label.trim().substring(
+                          0,
+                          label.trim().length.clamp(0, 40),
+                        )
+                      : null,
+                  remaining: remaining,
+                  isRunning: restoresRunning,
+                  isFinished: isFinished,
+                  deadline: restoresRunning ? deadline : null,
                 ),
               );
             }
@@ -95,6 +121,7 @@ class _TimerScreenState extends State<TimerScreen> {
         _savedTimers.addAll(loadedTimers);
         _isLoading = false;
       });
+      _updateRunningTimers();
     } else {
       for (final timer in loadedTimers) {
         timer.dispose();
@@ -106,26 +133,52 @@ class _TimerScreenState extends State<TimerScreen> {
     final preferences = await SharedPreferences.getInstance();
     final encoded = jsonEncode(
       _savedTimers
-          .map((timer) => {'id': timer.id, 'seconds': timer.duration.inSeconds})
+          .map(
+            (timer) => {
+              'id': timer.id,
+              'seconds': timer.duration.inSeconds,
+              'remainingMs': timer.remaining.inMilliseconds,
+              'running': timer.isRunning,
+              'deadlineMs': timer.deadline?.millisecondsSinceEpoch,
+              'finished': timer.isFinished,
+              'label': timer.label,
+            },
+          )
           .toList(),
     );
     await preferences.setString(_savedTimersKey, encoded);
   }
 
-  void _addTimer(Duration duration) {
+  Future<void> _persistAndReport() async {
+    try {
+      await _persistSavedTimers();
+    } on Exception {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text("Couldn't save timers. Changes may not persist."),
+        ),
+      );
+    }
+  }
+
+  void _addTimer(Duration duration, String? label) {
     final timer = _SavedTimer(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       duration: duration,
+      label: label,
     );
     setState(() => _savedTimers.insert(0, timer));
-    unawaited(_persistSavedTimers());
+    unawaited(_persistAndReport());
   }
 
   void _deleteTimer(_SavedTimer timer) {
     setState(() => _savedTimers.remove(timer));
     _syncTicker();
     WidgetsBinding.instance.addPostFrameCallback((_) => timer.dispose());
-    unawaited(_persistSavedTimers());
+    unawaited(_persistAndReport());
   }
 
   void _toggleTimer(_SavedTimer timer) {
@@ -145,14 +198,27 @@ class _TimerScreenState extends State<TimerScreen> {
       timer.deadline = DateTime.now().add(remaining);
     }
     _syncTicker();
+    unawaited(_persistAndReport());
   }
 
-  void _updateRunningTimers() {
+  void _dismissTimer(_SavedTimer timer) {
+    timer.update(
+      remaining: timer.duration,
+      isRunning: false,
+      isFinished: false,
+    );
+    timer.deadline = null;
+    _syncTicker();
+    unawaited(_persistAndReport());
+  }
+
+  void _updateRunningTimers({bool notifyOnFinish = false}) {
     if (!_tickerModeEnabled) {
       _syncTicker();
       return;
     }
     final now = DateTime.now();
+    var changedState = false;
     for (final timer in _savedTimers.where((timer) => timer.isRunning)) {
       final remaining = timer.deadline!.difference(now);
       if (remaining <= Duration.zero) {
@@ -162,18 +228,37 @@ class _TimerScreenState extends State<TimerScreen> {
           isFinished: true,
         );
         timer.deadline = null;
+        changedState = true;
+        if (notifyOnFinish) {
+          unawaited(_notifyFinished(timer));
+        }
       } else {
         timer.update(remaining: remaining);
       }
     }
     _syncTicker();
+    if (changedState) {
+      unawaited(_persistAndReport());
+    }
+  }
+
+  Future<void> _notifyFinished(_SavedTimer timer) async {
+    final onTimerFinished = widget.onTimerFinished;
+    if (onTimerFinished == null) {
+      return;
+    }
+    try {
+      await onTimerFinished(_displayTitle(timer));
+    } on Exception catch (error) {
+      developer.log('Timer completion alert failed', error: error);
+    }
   }
 
   void _syncTicker() {
     if (_tickerModeEnabled &&
         _savedTimers.any((savedTimer) => savedTimer.isRunning)) {
       _ticker ??= Timer.periodic(const Duration(milliseconds: 250), (_) {
-        _updateRunningTimers();
+        _updateRunningTimers(notifyOnFinish: true);
       });
     } else {
       _ticker?.cancel();
@@ -191,6 +276,9 @@ class _TimerScreenState extends State<TimerScreen> {
       builder: (context) => _TimerSetupSheet(onSave: _addTimer),
     );
   }
+
+  String _displayTitle(_SavedTimer timer) =>
+      timer.label ?? _timerLabel(timer.duration);
 
   String _timerLabel(Duration duration) {
     if (duration.inHours > 0) {
@@ -244,8 +332,9 @@ class _TimerScreenState extends State<TimerScreen> {
                       return _SavedTimerCard(
                         key: ValueKey('timer-card-${timer.id}'),
                         timer: timer,
-                        title: _timerLabel(timer.duration),
+                        title: _displayTitle(timer),
                         onToggle: () => _toggleTimer(timer),
+                        onDismiss: () => _dismissTimer(timer),
                         onDelete: () => _deleteTimer(timer),
                       );
                     },
@@ -264,11 +353,25 @@ class _TimerScreenState extends State<TimerScreen> {
 }
 
 class _SavedTimer {
-  _SavedTimer({required this.id, required this.duration})
-    : state = ValueNotifier(_SavedTimerState(remaining: duration));
+  _SavedTimer({
+    required this.id,
+    required this.duration,
+    this.label,
+    Duration? remaining,
+    bool isRunning = false,
+    bool isFinished = false,
+    this.deadline,
+  }) : state = ValueNotifier(
+         _SavedTimerState(
+           remaining: remaining ?? duration,
+           isRunning: isRunning,
+           isFinished: isFinished,
+         ),
+       );
 
   final String id;
   final Duration duration;
+  final String? label;
   final ValueNotifier<_SavedTimerState> state;
   DateTime? deadline;
 
@@ -306,12 +409,14 @@ class _SavedTimerCard extends StatelessWidget {
     required this.timer,
     required this.title,
     required this.onToggle,
+    required this.onDismiss,
     required this.onDelete,
   });
 
   final _SavedTimer timer;
   final String title;
   final VoidCallback onToggle;
+  final VoidCallback onDismiss;
   final VoidCallback onDelete;
 
   @override
@@ -351,45 +456,75 @@ class _SavedTimerCard extends StatelessWidget {
                             : colorScheme.onSurface,
                       ),
                     ),
+                    if (state.isFinished) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                        key: ValueKey('timer-card-finished-${timer.id}'),
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline,
+                            size: 16,
+                            color: colorScheme.error,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Finished',
+                            style: Theme.of(context).textTheme.labelMedium
+                                ?.copyWith(color: colorScheme.error),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
-              SizedBox.square(
-                dimension: 64,
-                child: Stack(
-                  alignment: Alignment.center,
+              if (state.isFinished)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    SizedBox.square(
-                      dimension: 64,
-                      child: CircularProgressIndicator(
-                        value: progress,
-                        strokeWidth: 3,
-                        color: state.isFinished
-                            ? colorScheme.error
-                            : colorScheme.primary,
-                        backgroundColor: colorScheme.surfaceContainerHighest,
-                      ),
+                    IconButton(
+                      key: ValueKey('timer-card-restart-${timer.id}'),
+                      tooltip: 'Restart $title',
+                      onPressed: onToggle,
+                      icon: const Icon(Icons.replay, size: 26),
                     ),
                     IconButton(
-                      key: ValueKey('timer-card-action-${timer.id}'),
-                      tooltip: state.isRunning
-                          ? 'Pause $title'
-                          : state.isFinished
-                          ? 'Restart $title'
-                          : 'Start $title',
-                      onPressed: onToggle,
-                      icon: Icon(
-                        state.isRunning
-                            ? Icons.pause
-                            : state.isFinished
-                            ? Icons.replay
-                            : Icons.play_arrow,
-                        size: 28,
-                      ),
+                      key: ValueKey('timer-card-dismiss-${timer.id}'),
+                      tooltip: 'Stop and dismiss $title',
+                      onPressed: onDismiss,
+                      icon: const Icon(Icons.stop_circle_outlined, size: 28),
                     ),
                   ],
+                )
+              else
+                SizedBox.square(
+                  dimension: 64,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox.square(
+                        dimension: 64,
+                        child: CircularProgressIndicator(
+                          value: progress,
+                          strokeWidth: 3,
+                          color: colorScheme.primary,
+                          backgroundColor: colorScheme.surfaceContainerHighest,
+                        ),
+                      ),
+                      IconButton(
+                        key: ValueKey('timer-card-action-${timer.id}'),
+                        tooltip: state.isRunning
+                            ? 'Pause $title'
+                            : 'Start $title',
+                        onPressed: onToggle,
+                        icon: Icon(
+                          state.isRunning ? Icons.pause : Icons.play_arrow,
+                          size: 28,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
               IconButton(
                 key: ValueKey('timer-card-delete-${timer.id}'),
                 tooltip: 'Delete $title',
@@ -471,13 +606,14 @@ class _EmptyTimersState extends StatelessWidget {
 class _TimerSetupSheet extends StatefulWidget {
   const _TimerSetupSheet({required this.onSave});
 
-  final ValueChanged<Duration> onSave;
+  final void Function(Duration duration, String? label) onSave;
 
   @override
   State<_TimerSetupSheet> createState() => _TimerSetupSheetState();
 }
 
 class _TimerSetupSheetState extends State<_TimerSetupSheet> {
+  static const _maxLabelLength = 40;
   static const _quickPresets = <Duration>[
     Duration(seconds: 30),
     Duration(minutes: 1),
@@ -501,6 +637,13 @@ class _TimerSetupSheetState extends State<_TimerSetupSheet> {
   ];
 
   String _digits = '';
+  final _labelController = TextEditingController();
+
+  @override
+  void dispose() {
+    _labelController.dispose();
+    super.dispose();
+  }
 
   Duration get _selectedDuration {
     final time = _digits.padLeft(6, '0');
@@ -622,6 +765,17 @@ class _TimerSetupSheetState extends State<_TimerSetupSheet> {
                 ],
               ),
             ),
+            const SizedBox(height: 16),
+            TextField(
+              key: const ValueKey('timer-label-field'),
+              controller: _labelController,
+              maxLength: _maxLabelLength,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Label (optional)',
+                prefixIcon: Icon(Icons.edit_outlined),
+              ),
+            ),
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
@@ -630,7 +784,11 @@ class _TimerSetupSheetState extends State<_TimerSetupSheet> {
                 key: const ValueKey('timer-save'),
                 onPressed: canSave
                     ? () {
-                        widget.onSave(_selectedDuration);
+                        final label = _labelController.text.trim();
+                        widget.onSave(
+                          _selectedDuration,
+                          label.isEmpty ? null : label,
+                        );
                         Navigator.of(context).pop();
                       }
                     : null,
