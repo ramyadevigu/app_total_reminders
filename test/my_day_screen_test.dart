@@ -77,6 +77,43 @@ void main() {
     expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isTrue);
   });
 
+  testWidgets('in-progress status survives switching to Board view', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'my_day_in_progress_v1': jsonEncode(['2026-10-8:board-task']),
+    });
+    final storage = ReminderStorage(
+      notificationScheduler: FakeReminderNotificationScheduler(),
+    );
+    await storage.addReminder(
+      Reminder(
+        id: 'board-task',
+        title: 'Write report',
+        dateTime: DateTime(2026, 10, 8, 10),
+        createdAt: DateTime(2026, 10, 1),
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MyDayScreen(
+          appMenu: const SizedBox.shrink(),
+          navigationDrawer: const SizedBox.shrink(),
+          storage: storage,
+          clock: () => DateTime(2026, 10, 8, 8),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('In progress'), findsOneWidget);
+
+    await tester.tap(find.text('Board'));
+    await tester.pumpAndSettle();
+    expect(find.text('Write report'), findsOneWidget);
+    expect(find.text('In progress'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('completing a one-time reminder cancels its notification', (
     tester,
   ) async {

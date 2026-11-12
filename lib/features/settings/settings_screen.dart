@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../auth/widgets/google_account_section.dart';
 import '../calender/models/calendar_view_mode.dart';
 import '../../services/notification_service.dart';
+import '../../services/ui_sound_service.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_design_tokens.dart';
 import '../../theme/app_color_themes.dart';
@@ -46,6 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<ReminderSoundOption> _availableSounds = const [];
   Future<void> _saveQueue = Future<void>.value();
   bool _isLoading = true;
+  bool _uiSoundsEnabled = true;
 
   @override
   void initState() {
@@ -55,6 +57,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
         widget.preferencesStore ?? const ReminderPreferencesStore();
     _loadDefaults();
     _loadSounds();
+    _loadUiSoundsEnabled();
+  }
+
+  Future<void> _loadUiSoundsEnabled() async {
+    final enabled = await UiSoundService.instance.isEnabled();
+    if (mounted) setState(() => _uiSoundsEnabled = enabled);
+  }
+
+  Future<void> _setUiSoundsEnabled(bool value) async {
+    setState(() => _uiSoundsEnabled = value);
+    await UiSoundService.instance.setEnabled(value);
+    if (value) await UiSoundService.instance.play();
   }
 
   @override
@@ -407,6 +421,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 title: 'Snooze duration',
                 subtitle: _snoozeLabel(_defaults.snoozeDurationMinutes),
                 onTap: _selectSnoozeDuration,
+              ),
+            ],
+          ),
+          _SettingsSection(
+            title: 'Sounds',
+            children: [
+              _SettingsSwitchTile(
+                key: const ValueKey('settings-ui-sounds'),
+                icon: Icons.volume_up_outlined,
+                title: 'Interface sounds',
+                subtitle: _uiSoundsEnabled ? 'On' : 'Off',
+                value: _uiSoundsEnabled,
+                onChanged: _setUiSoundsEnabled,
               ),
             ],
           ),
